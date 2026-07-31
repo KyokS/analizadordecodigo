@@ -968,7 +968,7 @@ function computeLayout(data) {
     const H = container.clientHeight;
 
     const NODE_W = 250, NODE_H = 82;
-    const H_GAP = 160, SUB_GAP = 64, V_GAP = 56, MARGIN = 80;
+    const H_GAP = 210, SUB_GAP = 96, V_GAP = 84, MARGIN = 100;
     const MAX_ROWS = 6;
 
     const columns = COLUMN_TYPES.map(() => []);
@@ -1095,8 +1095,8 @@ function updateLinksForNode(nodeId, pos, data) {
 }
 
 function buildLinkPath(s, t, o) {
-    const sy = s.y + s.h / 2 + o.fanS * 5;
-    const ty = t.y + t.h / 2 + o.fanT * 5;
+    const sy = s.y + s.h / 2 + o.fanS * 10;
+    const ty = t.y + t.h / 2 + o.fanT * 10;
     const sx = s.x + s.w;
     const tx = t.x;
     if (sy === ty) return `M ${sx},${sy} L ${tx},${ty}`;
@@ -1300,7 +1300,7 @@ function updateGraph(rawData) {
         laneMap.get(key).push(link);
     }
     for (const ls of laneMap.values()) {
-        const step = ls.length > 6 ? 20 : ls.length > 3 ? 26 : 30;
+        const step = ls.length > 6 ? 34 : ls.length > 3 ? 44 : 52;
         ls.forEach((l, i) => {
             l._lane = (i - (ls.length - 1) / 2) * step;
             l._laneN = ls.length;
