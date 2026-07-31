@@ -2066,6 +2066,13 @@ function updateUnrecognized(code, language) {
     `;
 }
 
+// Client ID de OAuth de Google (Aplicación web) para el botón "Iniciar sesión con Google".
+// Cómo crearlo: console.cloud.google.com -> crear proyecto -> "Generative Language API" activada ->
+// Credenciales -> Crear credenciales -> ID de cliente OAuth -> Aplicación web ->
+// en "Orígenes de JavaScript autorizados" pon la URL de tu web. Pega el ID aquí y los visitantes
+// se conectarán a la IA gratuita con un solo clic.
+const GOOGLE_CLIENT_ID = '';
+
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 function buildGraphSummary() {
@@ -2181,7 +2188,7 @@ function mdToHtml(md) {
     return html;
 }
 
-async function callGemini(key, prompt) {
+async function callGemini(auth, prompt) {
     const body = {
         system_instruction: { parts: [{ text: 'Eres un analista senior de código. Explica con claridad, en español, usando los nombres reales de las entidades. Usa títulos, listas cortas y, si hace falta, un ejemplo breve. No inventes código que no esté presente.' }] },
         contents: [{ parts: [{ text: prompt }] }],
@@ -2189,11 +2196,14 @@ async function callGemini(key, prompt) {
     };
     let lastErr = null;
     for (const model of GEMINI_MODELS) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (auth.type === 'key') headers['x-goog-api-key'] = auth.value;
+        else headers['Authorization'] = 'Bearer ' + auth.value;
         try {
             const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(body)
             });
             if (!res.ok) {
@@ -2224,44 +2234,154 @@ function showAiPanel(html) {
     overlay.classList.remove('hidden');
 }
 
-function showAiKeyRequest(onSave) {
-    showAiPanel(
-        '<div class="ai-result">' +
-        '<h3>Explicar con IA (Gemini, gratis)</h3>' +
-        '<p class="ai-msg">Para que la IA explique necesitas una clave de API gratuita:</p>' +
+function showAiSetup(prompt) {
+    const cid = getClientId();
+    const canGoogle = cid && typeof google !== 'undefined' && google.accounts && google.accounts.oauth2;
+    let html = '<div class="ai-result">' +
+        '<h3>Conectar con la IA (Gemini, gratis)</h3>' +
+        '<p class="ai-msg">Elige cómo conectar la IA gratuita de Google:</p>';
+    if (canGoogle) {
+        html += '<button id="aiGoogleBtn" class="btn-mini btn-google">Iniciar sesión con Google (1 clic)</button>' +
+            '<p class="ai-note">Te pedirá permiso para usar la IA de Google en esta web. Es gratis y no vemos tu contraseña.</p>';
+    }
+    html += '<p class="ai-msg">O con una clave de API gratuita:</p>' +
         '<ol class="ai-steps">' +
         '<li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></li>' +
         '<li>Pulsa <b>Create API key</b> y copia la clave.</li>' +
-        '<li>Pégala aquí abajo (se guarda solo en tu navegador, nunca sale de él).</li>' +
+        '<li>Pégala abajo (se guarda solo en tu navegador).</li>' +
         '</ol>' +
         '<div class="ai-keyrow">' +
         '<input id="aiKeyInput" type="password" placeholder="Pega aquí tu clave de Gemini..." />' +
         '<button id="aiKeySave" class="btn-mini">Guardar y explicar</button>' +
         '</div>' +
         '<p class="ai-msg">¿Prefieres verla sin IA?</p>' +
-        '<button id="aiLocal" class="btn-mini">Explicación lógica local</button>' +
-        '</div>'
-    );
+        '<button id="aiLocal" class="btn-mini">Explicación lógica local</button>';
+    if (!cid) {
+        html += '<hr style="border-color:rgba(139,92,246,.2);margin:12px 0">' +
+            '<p class="ai-note"><b>Para el administrador:</b> para que todos los visitantes vean el botón "Iniciar sesión con Google", pega aquí tu <b>Google OAuth Client ID</b> (o déjalo en la constante GOOGLE_CLIENT_ID de app.js):</p>' +
+            '<div class="ai-keyrow">' +
+            '<input id="aiCidInput" placeholder="Client ID de Google Cloud..." />' +
+            '<button id="aiCidSave" class="btn-mini">Guardar</button>' +
+            '</div>';
+    }
+    html += '</div>';
+    showAiPanel(html);
+
     document.getElementById('aiKeySave').addEventListener('click', () => {
         const k = document.getElementById('aiKeyInput').value.trim();
-        if (k) { localStorage.setItem('geminiKey', k); onSave(); }
+        if (k) { localStorage.setItem('geminiKey', k); aiExplain(prompt); }
     });
     document.getElementById('aiLocal').addEventListener('click', () => showAiPanel(buildLocalExplanation()));
+    if (canGoogle) {
+        document.getElementById('aiGoogleBtn').addEventListener('click', () => {
+            pendingExplain = prompt;
+            initGoogleClient();
+            if (googleTokenClient) googleTokenClient.requestAccessToken();
+        });
+    }
+    const cidSave = document.getElementById('aiCidSave');
+    if (cidSave) {
+        cidSave.addEventListener('click', () => {
+            const c = document.getElementById('aiCidInput').value.trim();
+            if (c) {
+                localStorage.setItem('geminiClientId', c);
+                googleTokenClient = null;
+                aiExplain(prompt);
+            }
+        });
+    }
+}
+
+let pendingExplain = null;
+let googleTokenClient = null;
+let googleTokenClientCid = null;
+
+function getClientId() {
+    return GOOGLE_CLIENT_ID || localStorage.getItem('geminiClientId') || '';
+}
+
+function getToken() {
+    const t = localStorage.getItem('geminiToken');
+    const exp = Number(localStorage.getItem('geminiTokenExp') || 0);
+    return (t && exp > Date.now()) ? t : null;
+}
+
+function whenGoogleReady(cb, tries) {
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) { cb(); return; }
+    if ((tries || 0) > 40) { const p = pendingExplain; pendingExplain = null; showAiSetup(p); return; }
+    setTimeout(() => whenGoogleReady(cb, (tries || 0) + 1), 200);
+}
+
+function initGoogleClient() {
+    const cid = getClientId();
+    if (!cid || typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) return false;
+    if (googleTokenClient && googleTokenClientCid === cid) return true;
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: cid,
+        scope: 'https://www.googleapis.com/auth/generative-language',
+        callback: (resp) => {
+            if (resp && resp.access_token) {
+                localStorage.setItem('geminiToken', resp.access_token);
+                localStorage.setItem('geminiTokenExp', String(Date.now() + (resp.expires_in || 3600) * 1000));
+                runPendingExplain();
+            }
+        },
+        error_callback: () => {
+            const p = pendingExplain; pendingExplain = null;
+            showAiSetup(p);
+        }
+    });
+    googleTokenClientCid = cid;
+    return true;
+}
+
+function runPendingExplain() {
+    if (pendingExplain) {
+        const p = pendingExplain;
+        pendingExplain = null;
+        aiExplain(p);
+    }
+}
+
+async function doExplain(auth, prompt) {
+    showAiPanel('<div class="ai-loading"><span class="ai-spinner"></span> La IA está analizando...</div>');
+    try {
+        const text = await callGemini(auth, prompt);
+        showAiPanel('<div class="ai-result">' + mdToHtml(text) + '</div>');
+    } catch (err) {
+        if (auth.type === 'token') {
+            localStorage.removeItem('geminiToken');
+            localStorage.removeItem('geminiTokenExp');
+            aiExplain(prompt);
+            return;
+        }
+        showAiPanel('<div class="ai-error">⚠️ No pude conectar con Gemini: ' + err.message +
+            '<br><br><button id="aiRetry" class="btn-mini">Reintentar</button> ' +
+            '<button id="aiLocal2" class="btn-mini">Explicación local</button></div>');
+        document.getElementById('aiRetry').addEventListener('click', () => doExplain(auth, prompt));
+        document.getElementById('aiLocal2').addEventListener('click', () => showAiPanel(buildLocalExplanation()));
+    }
 }
 
 function aiExplain(prompt) {
+    const token = getToken();
     const key = localStorage.getItem('geminiKey') || '';
-    if (!key) { showAiKeyRequest(() => aiExplain(prompt)); return; }
-    showAiPanel('<div class="ai-loading"><span class="ai-spinner"></span> La IA está analizando...</div>');
-    callGemini(key, prompt)
-        .then(text => showAiPanel('<div class="ai-result">' + mdToHtml(text) + '</div>'))
-        .catch(err => {
-            showAiPanel('<div class="ai-error">⚠️ No pude conectar con Gemini: ' + err.message +
-                '<br><br><button id="aiRetry" class="btn-mini">Reintentar</button> ' +
-                '<button id="aiLocal2" class="btn-mini">Explicación local</button></div>');
-            document.getElementById('aiRetry').addEventListener('click', () => aiExplain(prompt));
-            document.getElementById('aiLocal2').addEventListener('click', () => showAiPanel(buildLocalExplanation()));
+    if (token) { doExplain({ type: 'token', value: token }, prompt); return; }
+    if (key) { doExplain({ type: 'key', value: key }, prompt); return; }
+    if (getClientId()) {
+        pendingExplain = prompt;
+        whenGoogleReady(() => {
+            initGoogleClient();
+            if (googleTokenClient) {
+                showAiPanel('<div class="ai-loading"><span class="ai-spinner"></span> Conectando con Google...</div>');
+                googleTokenClient.requestAccessToken({ prompt: '' });
+            } else {
+                showAiSetup(prompt);
+            }
         });
+        return;
+    }
+    showAiSetup(prompt);
 }
 
 function buildWholePrompt(code) {
@@ -2368,6 +2488,14 @@ function setupAiExplain() {
     });
 
     keyBtn.addEventListener('click', () => {
+        if (getToken()) {
+            const out = confirm('Tienes sesión iniciada con Google. ¿Cerrar sesión?');
+            if (out) {
+                localStorage.removeItem('geminiToken');
+                localStorage.removeItem('geminiTokenExp');
+            }
+            return;
+        }
         const current = localStorage.getItem('geminiKey') || '';
         const k = prompt(
             current ? 'Tu clave actual está guardada. Escribe una nueva (o vacío para borrarla):' : 'Pega tu clave de Gemini (gratis en aistudio.google.com/apikey):',
