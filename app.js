@@ -747,16 +747,43 @@ function analyzeCode(code, language) {
         if (!linkSet.has(l.key)) { linkSet.add(l.key); uniqueLinks.push({ source: l.source, target: l.target, linkType: l.linkType }); }
     }
 
+    const LINK_PRIORITY = { 'defines': 1, 'calls': 2, 'imports': 3, 'provides': 4, 'depends': 5, 'receives': 6, 'references': 7, 'uses': 8, 'ref': 9 };
+
+    const pairBest = new Map();
+    for (const l of uniqueLinks) {
+        const key = `${l.source}->${l.target}`;
+        const prev = pairBest.get(key);
+        if (!prev || (LINK_PRIORITY[l.linkType] || 9) < (LINK_PRIORITY[prev.linkType] || 9)) {
+            pairBest.set(key, l);
+        }
+    }
+
+    const MAX_LINKS_PER_NODE = 6;
+    const filtered = Array.from(pairBest.values()).sort(
+        (a, b) => (LINK_PRIORITY[a.linkType] || 9) - (LINK_PRIORITY[b.linkType] || 9)
+    );
+    const countPerNode = new Map();
+    const cappedLinks = [];
+    for (const l of filtered) {
+        const s = countPerNode.get(l.source) || 0;
+        const t = countPerNode.get(l.target) || 0;
+        if (s < MAX_LINKS_PER_NODE && t < MAX_LINKS_PER_NODE) {
+            cappedLinks.push(l);
+            countPerNode.set(l.source, s + 1);
+            countPerNode.set(l.target, t + 1);
+        }
+    }
+
     nodeList.forEach(n => {
         const conns = new Set();
-        uniqueLinks.forEach(l => {
+        cappedLinks.forEach(l => {
             if (l.source === n.id) conns.add(l.target);
             if (l.target === n.id) conns.add(l.source);
         });
         n.connections = Array.from(conns);
     });
 
-    return { nodes: nodeList, links: uniqueLinks };
+    return { nodes: nodeList, links: cappedLinks };
 }
 
 function initGraph() {
@@ -989,9 +1016,18 @@ function updateLinksForNode(nodeId, pos, data) {
         const ty = t.y + t.h / 2;
 
         const midX = (sx + tx) / 2;
-        const pathD = sy === ty
-            ? `M${sx},${sy} L${tx},${ty}`
-            : `M${sx},${sy} L${midX},${sy} L${midX},${ty} L${tx},${ty}`;
+        const laneOffset = (this._lane || 0) * 14;
+        let pathD;
+        if (sy === ty) {
+            if (laneOffset === 0) {
+                pathD = `M${sx},${sy} L${tx},${ty}`;
+            } else {
+                const bx = midX - 22;
+                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + laneOffset} L${bx + 44},${sy + laneOffset} L${bx + 44},${ty} L${tx},${ty}`;
+            }
+        } else {
+            pathD = `M${sx},${sy} L${midX + laneOffset},${sy} L${midX + laneOffset},${ty} L${tx},${ty}`;
+        }
 
         d3.select(this).attr('d', pathD);
     });
@@ -1096,6 +1132,18 @@ function updateGraph(data) {
             .lower();
     }
 
+    const laneMap = new Map();
+    for (const link of data.links) {
+        const s = pos[link.source], t = pos[link.target];
+        if (!s || !t) continue;
+        const key = s.col + '->' + t.col;
+        if (!laneMap.has(key)) laneMap.set(key, []);
+        laneMap.get(key).push(link);
+    }
+    for (const ls of laneMap.values()) {
+        ls.forEach((l, i) => l._lane = i - (ls.length - 1) / 2);
+    }
+
     for (const link of data.links) {
         const s = pos[link.source], t = pos[link.target];
         if (!s || !t) continue;
@@ -1109,10 +1157,19 @@ function updateGraph(data) {
         const tx = t.x;
         const ty = t.y + t.h / 2;
 
+        const laneOffset = (link._lane || 0) * 14;
         const midX = (sx + tx) / 2;
-        const pathD = sy === ty
-            ? `M${sx},${sy} L${tx},${ty}`
-            : `M${sx},${sy} L${midX},${sy} L${midX},${ty} L${tx},${ty}`;
+        let pathD;
+        if (sy === ty) {
+            if (laneOffset === 0) {
+                pathD = `M${sx},${sy} L${tx},${ty}`;
+            } else {
+                const bx = midX - 22;
+                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + laneOffset} L${bx + 44},${sy + laneOffset} L${bx + 44},${ty} L${tx},${ty}`;
+            }
+        } else {
+            pathD = `M${sx},${sy} L${midX + laneOffset},${sy} L${midX + laneOffset},${ty} L${tx},${ty}`;
+        }
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
         const strokeW = linkInfo.style === 'solid' ? 2.5 : 2;
@@ -1123,7 +1180,7 @@ function updateGraph(data) {
             .attr('fill', 'none')
             .attr('stroke', linkColor)
             .attr('stroke-width', strokeW)
-            .attr('stroke-opacity', 0.6)
+            .attr('stroke-opacity', 0.5)
             .attr('stroke-linejoin', 'round')
             .attr('stroke-dasharray', dashArray)
             .attr('marker-end', `url(${getChainMarkerId(linkColor)})`)
