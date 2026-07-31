@@ -506,12 +506,6 @@ g[data-dragging="true"] > rect:first-child {
 circle { transition: all 0.2s ease; }
 g:hover circle { opacity: 0.8 !important; r: 5; }
 
-@keyframes flowPulse {
-    0% { stroke-opacity: 0.35; }
-    50% { stroke-opacity: 0.65; }
-    100% { stroke-opacity: 0.35; }
-}
-
 /* Link path hover effect */
 path[data-source]:hover {
     filter: drop-shadow(0 0 8px currentColor);

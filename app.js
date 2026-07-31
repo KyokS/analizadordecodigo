@@ -758,7 +758,7 @@ function analyzeCode(code, language) {
         }
     }
 
-    const MAX_LINKS_PER_NODE = 5;
+    const MAX_LINKS_PER_NODE = 3;
     const filtered = Array.from(pairBest.values()).sort(
         (a, b) => (LINK_PRIORITY[a.linkType] || 9) - (LINK_PRIORITY[b.linkType] || 9)
     );
@@ -1097,12 +1097,6 @@ function updateLinksForNode(nodeId, pos, data) {
 function buildLinkPath(s, t, o) {
     const sy = s.y + s.h / 2 + o.fanS * 5;
     const ty = t.y + t.h / 2 + o.fanT * 5;
-    if (o.longRange) {
-        const ex = s.x + s.w + 6 + o.fanS * 7;
-        const en = t.x - 6 - o.fanT * 7;
-        const ly = o.laneY + o.laneSmall;
-        return `M ${ex},${sy} L ${ex},${ly} L ${en},${ly} L ${en},${ty} L ${t.x},${ty}`;
-    }
     const sx = s.x + s.w;
     const tx = t.x;
     if (sy === ty) return `M ${sx},${sy} L ${tx},${ty}`;
@@ -1297,28 +1291,6 @@ function updateGraph(rawData) {
             .lower();
     }
 
-    const flowCols = Object.keys(colGeom).map(Number).sort((a, b) => a - b);
-    for (let i = 0; i < flowCols.length - 1; i++) {
-        const from = colGeom[flowCols[i]], to = colGeom[flowCols[i + 1]];
-        const x1 = from.right + 12;
-        const x2 = to.left - 12;
-        if (x2 - x1 < 24) continue;
-        const fy = (from.top + to.top) / 2 + 8;
-        const blend = d3.interpolateRgb(COLUMN_COLORS[flowCols[i]], COLUMN_COLORS[flowCols[i + 1]])(0.5);
-        const faId = getFlowArrowId(blend, `${flowCols[i]}-${flowCols[i + 1]}`);
-        const fgId = getFlowGradId(COLUMN_COLORS[flowCols[i]], COLUMN_COLORS[flowCols[i + 1]], x1, x2);
-        linkGroup.append('path')
-            .attr('d', `M${x1},${fy} L${x2},${fy}`)
-            .attr('fill', 'none')
-            .attr('stroke', `url(#${fgId})`)
-            .attr('stroke-width', 2.5)
-            .attr('stroke-opacity', 1)
-            .attr('stroke-linecap', 'round')
-            .attr('marker-end', `url(#${faId})`)
-            .attr('pointer-events', 'none')
-            .lower();
-    }
-
     const laneMap = new Map();
     for (const link of data.links) {
         const s = pos[link.source], t = pos[link.target];
@@ -1335,8 +1307,6 @@ function updateGraph(rawData) {
             l._laneI = i;
         });
     }
-
-    const serviceLaneY = Math.min.apply(null, Object.values(pos).map(p => p.y)) - 80;
 
     const srcFan = new Map(), tgtFan = new Map();
     for (const link of data.links) {
@@ -1363,18 +1333,17 @@ function updateGraph(rawData) {
 
         const fanS = (link._fanS || 0) - ((link._fanSN || 1) - 1) / 2;
         const fanT = (link._fanT || 0) - ((link._fanTN || 1) - 1) / 2;
-        const laneSmall = ((link._laneI || 0) - ((link._laneN || 1) - 1) / 2) * 6;
-        const longRange = s.col === t.col || Math.abs(t.col - s.col) > 1;
-        const pathD = buildLinkPath(s, t, { lane: link._lane || 0, fanS, fanT, laneSmall, laneY: serviceLaneY, longRange });
+        const pathD = buildLinkPath(s, t, { lane: link._lane || 0, fanS, fanT });
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
-        const strokeW = linkInfo.style === 'solid' ? 3 : 2.5;
         const linkColor = linkInfo.color || '#666';
 
         const backward = s.col > t.col;
-        const finalColor = backward ? '#8b8fa3' : varyColor(linkColor, link._laneI || 0, link._laneN || 1);
-        const finalOpacity = backward ? 0.3 : 0.6;
-        const finalDash = backward ? '4,4' : dashArray;
+        const farJump = Math.abs(t.col - s.col) > 1;
+        const finalColor = backward || farJump ? '#8b8fa3' : varyColor(linkColor, link._laneI || 0, link._laneN || 1);
+        const finalOpacity = farJump ? 0.12 : backward ? 0.25 : 0.4;
+        const finalDash = backward || farJump ? '6,4' : dashArray;
+        const strokeW = backward || farJump ? 1.5 : linkInfo.style === 'solid' ? 2.5 : 2;
 
         const linkPath = linkGroup.append('path')
             .attr('d', pathD)
@@ -1387,11 +1356,13 @@ function updateGraph(rawData) {
             .attr('stroke-dasharray', finalDash)
             .attr('marker-end', `url(${getChainMarkerId(finalColor)})`)
             .attr('class', !backward && finalDash !== 'none' ? 'link-anim' : null)
+            .attr('data-default-opacity', finalOpacity)
+            .attr('data-default-width', strokeW)
             .style('cursor', 'pointer')
             .attr('data-source', link.source)
             .attr('data-target', link.target)
             .on('mouseover', function (event) {
-                d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5.5);
+                d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
                 clearAllHighlights();
                 showLinkTooltip(event, linkInfo, sourceNode, targetNode);
                 if (sourceNode) {
@@ -1413,7 +1384,7 @@ function updateGraph(rawData) {
                 nodeGroup.selectAll('g').attr('opacity', 1);
             });
 
-        linkPath.node()._pathInfo = { lane: link._lane || 0, fanS, fanT, laneSmall, laneY: serviceLaneY, longRange };
+        linkPath.node()._pathInfo = { lane: link._lane || 0, fanS, fanT };
 
         if (linkInfo) {
             const mx2 = (sx + tx) / 2;
@@ -1786,27 +1757,34 @@ function highlightNode(d) {
     const conn = new Set(d.connections); conn.add(d.id);
 
     nodeGroup.selectAll('g').attr('opacity', function (n) {
-        return conn.has(n.id) ? 1 : 0.12;
+        return conn.has(n.id) ? 1 : 0.1;
     });
 
-    linkGroup.selectAll('path').attr('stroke-opacity', function (l) {
-        return (l.source === d.id || l.target === d.id) ? 0.9 : 0.05;
-    }).attr('stroke-width', function (l) {
-        return (l.source === d.id || l.target === d.id) ? 5 : 2;
+    linkGroup.selectAll('path').each(function () {
+        const el = d3.select(this);
+        const src = el.attr('data-source');
+        const tgt = el.attr('data-target');
+        const isConn = src === d.id || tgt === d.id;
+        el.attr('stroke-opacity', isConn ? 0.95 : 0.04)
+          .attr('stroke-width', isConn ? 4.5 : 1);
     });
 
     linkGroup.selectAll('rect').attr('opacity', function () {
-        return 0.3;
+        return 0.2;
     });
 
     linkGroup.selectAll('text').attr('opacity', function () {
-        return 0.3;
+        return 0.2;
     });
 }
 
 function resetHighlight() {
     nodeGroup.selectAll('g').attr('opacity', 1);
-    linkGroup.selectAll('path').attr('stroke-opacity', 0.5).attr('stroke-width', 3);
+    linkGroup.selectAll('path').each(function () {
+        const el = d3.select(this);
+        el.attr('stroke-opacity', el.attr('data-default-opacity') || 0.4)
+          .attr('stroke-width', el.attr('data-default-width') || 2);
+    });
     linkGroup.selectAll('rect').attr('opacity', 1);
     linkGroup.selectAll('text').attr('opacity', 1);
 }
