@@ -1076,7 +1076,7 @@ function updateLinksForNode(nodeId, pos, data) {
         const ty = t.y + t.h / 2;
 
         const midX = (sx + tx) / 2;
-        const laneOffset = (this._lane || 0) * 14;
+        const laneOffset = this._lane || 0;
         let pathD;
         if (sy === ty) {
             if (laneOffset === 0) {
@@ -1221,7 +1221,6 @@ function updateGraph(rawData) {
             .lower();
     }
 
-    const flowArrowId = getFlowArrowId();
     const flowCols = Object.keys(colGeom).map(Number).sort((a, b) => a - b);
     for (let i = 0; i < flowCols.length - 1; i++) {
         const from = colGeom[flowCols[i]], to = colGeom[flowCols[i + 1]];
@@ -1229,13 +1228,15 @@ function updateGraph(rawData) {
         const x2 = to.left - 12;
         if (x2 - x1 < 24) continue;
         const fy = (from.top + to.top) / 2 + 8;
+        const blend = d3.interpolateRgb(COLUMN_COLORS[flowCols[i]], COLUMN_COLORS[flowCols[i + 1]])(0.5);
+        const faId = getFlowArrowId(blend, `${flowCols[i]}-${flowCols[i + 1]}`);
         linkGroup.append('path')
             .attr('d', `M${x1},${fy} L${x2},${fy}`)
             .attr('fill', 'none')
-            .attr('stroke', '#94a3b8')
+            .attr('stroke', blend)
             .attr('stroke-width', 2.5)
-            .attr('stroke-opacity', 0.3)
-            .attr('marker-end', `url(#${flowArrowId})`)
+            .attr('stroke-opacity', 0.5)
+            .attr('marker-end', `url(#${faId})`)
             .attr('pointer-events', 'none')
             .lower();
     }
@@ -1249,7 +1250,12 @@ function updateGraph(rawData) {
         laneMap.get(key).push(link);
     }
     for (const ls of laneMap.values()) {
-        ls.forEach((l, i) => l._lane = i - (ls.length - 1) / 2);
+        const step = ls.length > 6 ? 16 : ls.length > 3 ? 20 : 24;
+        ls.forEach((l, i) => {
+            l._lane = (i - (ls.length - 1) / 2) * step;
+            l._laneN = ls.length;
+            l._laneI = i;
+        });
     }
 
     for (const link of data.links) {
@@ -1265,7 +1271,7 @@ function updateGraph(rawData) {
         const tx = t.x;
         const ty = t.y + t.h / 2;
 
-        const laneOffset = (link._lane || 0) * 14;
+        const laneOffset = link._lane || 0;
         const midX = (sx + tx) / 2;
         let pathD;
         if (sy === ty) {
@@ -1280,12 +1286,12 @@ function updateGraph(rawData) {
         }
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
-        const strokeW = linkInfo.style === 'solid' ? 2.5 : 2;
+        const strokeW = linkInfo.style === 'solid' ? 3 : 2.5;
         const linkColor = linkInfo.color || '#666';
 
         const backward = s.col > t.col;
-        const finalColor = backward ? '#8b8fa3' : linkColor;
-        const finalOpacity = backward ? 0.28 : 0.55;
+        const finalColor = backward ? '#8b8fa3' : varyColor(linkColor, link._laneI || 0, link._laneN || 1);
+        const finalOpacity = backward ? 0.3 : 0.6;
         const finalDash = backward ? '4,4' : dashArray;
 
         const linkPath = linkGroup.append('path')
@@ -1600,10 +1606,64 @@ function getChainMarkerId(color) {
     return `url(#chain-arrow-${color.replace('#', '')})`;
 }
 
-function getFlowArrowId() {
-    if (document.getElementById('flow-arrow')) return 'flow-arrow';
+function hexToHsl(hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            default: h = (r - g) / d + 4;
+        }
+        h /= 6;
+    }
+    return [h * 360, s, l];
+}
+
+function hslToHex(h, s, l) {
+    h /= 360;
+    let r, g, b;
+    if (s === 0) {
+        r = g = b = l;
+    } else {
+        const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1 / 3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1 / 3);
+    }
+    const to = x => Math.round(Math.max(0, Math.min(255, x * 255))).toString(16).padStart(2, '0');
+    return '#' + to(r) + to(g) + to(b);
+}
+
+function varyColor(hex, i, n) {
+    if (n <= 1 || !hex) return hex;
+    const [h, s, l] = hexToHsl(hex);
+    const t = n === 1 ? 0 : i / (n - 1) - 0.5;
+    const nl = Math.min(0.82, Math.max(0.3, l + t * 0.32));
+    const ns = Math.min(0.95, Math.max(0.35, s - Math.abs(t) * 0.2));
+    return hslToHex(h, ns, nl);
+}
+
+function getFlowArrowId(color, tag) {
+    const id = `flow-arrow-${tag}`;
+    if (document.getElementById(id)) return id;
     defs.append('marker')
-        .attr('id', 'flow-arrow')
+        .attr('id', id)
         .attr('viewBox', '0 -8 20 16')
         .attr('refX', 18)
         .attr('refY', 0)
@@ -1612,8 +1672,8 @@ function getFlowArrowId() {
         .attr('orient', 'auto')
         .append('path')
         .attr('d', 'M0,-8L20,0L0,8Z')
-        .attr('fill', '#94a3b8');
-    return 'flow-arrow';
+        .attr('fill', color);
+    return id;
 }
 
 function updateLinks(data, pos) {
@@ -1810,6 +1870,7 @@ function updateLegend() {
     }).join('');
     html += '<div class="legend-item"><div class="legend-line" style="--line-color:#8b8fa3;border-top:2px dashed #8b8fa3"></div><span>Enlace inverso (va hacia atrás)</span></div>';
     html += '<div class="legend-item"><div class="legend-color" style="background:#fbbf24"></div><span>Paso N: orden de ejecución principal</span></div>';
+    html += '<div class="legend-item"><span style="color:#666;font-size:0.7rem">Los tonos varían para distinguir líneas paralelas</span></div>';
     html += '</div>';
 
     document.getElementById('legend').innerHTML = html;
