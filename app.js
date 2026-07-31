@@ -923,7 +923,7 @@ const COLUMN_TYPES = [
 ];
 const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
 const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
-const MAX_ZONE_NODES = 12;
+const MAX_ZONE_NODES = 8;
 let activeZones = new Set([0, 1, 2, 3]);
 let expandedZones = new Set();
 let fullData = null;
@@ -969,7 +969,7 @@ function computeLayout(data) {
 
     const NODE_W = 250, NODE_H = 82;
     const H_GAP = 210, SUB_GAP = 96, V_GAP = 84, MARGIN = 100;
-    const MAX_ROWS = 6;
+    const MAX_ROWS = 8;
 
     const columns = COLUMN_TYPES.map(() => []);
     const assigned = new Set();
@@ -1196,7 +1196,7 @@ function updateGraph(rawData) {
 
     const scaleX = containerW / contentW;
     const scaleY = containerH / contentH;
-    const autoScale = Math.min(scaleX, scaleY, 1);
+    const autoScale = Math.max(Math.min(scaleX, scaleY, 1), 0.65);
 
     svg.attr('width', containerW).attr('height', containerH);
 
@@ -1216,7 +1216,7 @@ function updateGraph(rawData) {
         const colNodes = data.nodes.filter(n => pos[n.id] && pos[n.id].col === c);
         if (!colNodes.length) continue;
 
-        const padX = 24, padY = 16;
+        const padX = 40, padY = 36;
         const zoneColor = COLUMN_COLORS[c];
 
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1644,7 +1644,7 @@ function autoFitZoom() {
     const contentH = maxY - minY + 60;
     const scaleX = W / contentW;
     const scaleY = H / contentH;
-    const s = Math.min(scaleX, scaleY, 1.2) * 0.85;
+    const s = Math.max(Math.min(scaleX, scaleY, 1.2), 0.65) * 0.85;
 
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
