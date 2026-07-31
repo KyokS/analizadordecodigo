@@ -923,7 +923,7 @@ const COLUMN_TYPES = [
 ];
 const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
 const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
-const MAX_ZONE_NODES = 8;
+const MAX_ZONE_NODES = 12;
 let activeZones = new Set([0, 1, 2, 3]);
 let expandedZones = new Set();
 let fullData = null;
@@ -968,7 +968,8 @@ function computeLayout(data) {
     const H = container.clientHeight;
 
     const NODE_W = 240, NODE_H = 72;
-    const H_GAP = 140, V_GAP = 36, MARGIN = 60;
+    const H_GAP = 110, SUB_GAP = 40, V_GAP = 34, MARGIN = 60;
+    const MAX_ROWS = 6;
 
     const columns = COLUMN_TYPES.map(() => []);
     const assigned = new Set();
@@ -993,38 +994,54 @@ function computeLayout(data) {
 
     columns.forEach(col => col.sort((a, b) => (a.line || 0) - (b.line || 0)));
 
-    const nonEmpty = columns.filter(c => c.length > 0);
-    const totalCols = Math.max(nonEmpty.length, 1);
-    const totalWidth = totalCols * NODE_W + (totalCols - 1) * H_GAP;
+    const zones = [];
+    for (let c = 0; c < columns.length; c++) {
+        if (!columns[c].length) continue;
+        const k = Math.min(2, Math.ceil(columns[c].length / MAX_ROWS));
+        const subs = [];
+        for (let s = 0; s < k; s++) subs.push(columns[c].slice(s * MAX_ROWS, (s + 1) * MAX_ROWS));
+        if (columns[c].length > k * MAX_ROWS) subs[k - 1].push(...columns[c].slice(k * MAX_ROWS));
+        zones.push({ c, subs });
+    }
+
+    let xCursor = 0;
+    const zoneX = [];
+    for (const z of zones) {
+        zoneX.push(xCursor);
+        xCursor += z.subs.length * NODE_W + (z.subs.length - 1) * SUB_GAP + H_GAP;
+    }
+    const totalWidth = xCursor - H_GAP;
     const startX = Math.max((W - totalWidth) / 2, MARGIN);
 
+    const PITCH = NODE_H + V_GAP;
+    const HALF_PITCH = PITCH / 2;
+
     const pos = {};
-    let colIdx = 0;
-
-    for (let c = 0; c < totalCols; c++) {
-        while (colIdx < columns.length && columns[colIdx].length === 0) colIdx++;
-        if (colIdx >= columns.length) break;
-
-        const col = columns[colIdx];
-        colIdx++;
-
-        const colX = startX + c * (NODE_W + H_GAP);
-        const totalH = col.length * NODE_H + (col.length - 1) * V_GAP;
+    for (let zi = 0; zi < zones.length; zi++) {
+        const z = zones[zi];
+        const zx = startX + zoneX[zi];
+        const rowsInZone = z.subs.reduce((m, s) => Math.max(m, s.length), 0);
+        const totalH = (rowsInZone - 1) * PITCH + NODE_H + (z.subs.length > 1 ? HALF_PITCH : 0);
         const startY = (H - totalH) / 2;
 
-        for (let r = 0; r < col.length; r++) {
-            const node = col[r];
-            pos[node.id] = {
-                x: colX,
-                y: startY + r * (NODE_H + V_GAP),
-                w: NODE_W,
-                h: NODE_H,
-                col: c,
-                row: r,
-                color: node.color,
-                data: node
-            };
-        }
+        z.subs.forEach((sub, s) => {
+            const subX = zx + s * (NODE_W + SUB_GAP);
+            const off = (s % 2) * HALF_PITCH;
+            for (let r = 0; r < sub.length; r++) {
+                const node = sub[r];
+                pos[node.id] = {
+                    x: subX,
+                    y: startY + off + r * PITCH,
+                    w: NODE_W,
+                    h: NODE_H,
+                    col: z.c,
+                    sub: s,
+                    row: r,
+                    color: node.color,
+                    data: node
+                };
+            }
+        });
     }
 
     return pos;
@@ -1077,16 +1094,17 @@ function updateLinksForNode(nodeId, pos, data) {
 
         const midX = (sx + tx) / 2;
         const laneOffset = this._lane || 0;
+        const clampedOffset = s.col === t.col ? Math.max(-12, Math.min(12, laneOffset)) : laneOffset;
         let pathD;
         if (sy === ty) {
-            if (laneOffset === 0) {
+            if (clampedOffset === 0) {
                 pathD = `M${sx},${sy} L${tx},${ty}`;
             } else {
                 const bx = midX - 22;
-                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + laneOffset} L${bx + 44},${sy + laneOffset} L${bx + 44},${ty} L${tx},${ty}`;
+                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + clampedOffset} L${bx + 44},${sy + clampedOffset} L${bx + 44},${ty} L${tx},${ty}`;
             }
         } else {
-            pathD = `M${sx},${sy} L${midX + laneOffset},${sy} L${midX + laneOffset},${ty} L${tx},${ty}`;
+            pathD = `M${sx},${sy} L${midX + clampedOffset},${sy} L${midX + clampedOffset},${ty} L${tx},${ty}`;
         }
 
         d3.select(this).attr('d', pathD);
@@ -1170,18 +1188,28 @@ function updateGraph(rawData) {
         const colNodes = data.nodes.filter(n => pos[n.id] && pos[n.id].col === c);
         if (!colNodes.length) continue;
 
-        const first = pos[colNodes[0].id];
-        const last = pos[colNodes[colNodes.length - 1].id];
-        const padX = 20, padY = 16;
+        const padX = 24, padY = 16;
         const zoneColor = COLUMN_COLORS[c];
 
-        colGeom[c] = { left: first.x - padX, right: first.x + first.w + padX, top: first.y - padY - 34 };
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        colNodes.forEach(n => {
+            const p = pos[n.id];
+            minX = Math.min(minX, p.x);
+            maxX = Math.max(maxX, p.x + p.w);
+            minY = Math.min(minY, p.y);
+            maxY = Math.max(maxY, p.y + p.h);
+        });
+
+        const zx = minX - padX, zy = minY - padY - 26;
+        const zw = maxX - minX + padX * 2, zh = maxY - minY + padY * 2 + 26;
+
+        colGeom[c] = { left: zx, right: zx + zw, top: zy };
 
         const zone = linkGroup.append('rect')
-            .attr('x', first.x - padX)
-            .attr('y', first.y - padY - 26)
-            .attr('width', first.w + padX * 2)
-            .attr('height', (last.y + last.h + padY) - (first.y - padY) + 26)
+            .attr('x', zx)
+            .attr('y', zy)
+            .attr('width', zw)
+            .attr('height', zh)
             .attr('rx', 14).attr('ry', 14)
             .attr('fill', zoneColor + '05')
             .attr('stroke', zoneColor + '22')
@@ -1199,8 +1227,8 @@ function updateGraph(rawData) {
         });
 
         linkGroup.append('rect')
-            .attr('x', first.x - padX + 6)
-            .attr('y', first.y - padY - 34)
+            .attr('x', zx + 6)
+            .attr('y', zy - 8)
             .attr('width', COLUMN_LABELS[c].length * 7 + 18)
             .attr('height', 16)
             .attr('rx', 8)
@@ -1210,8 +1238,8 @@ function updateGraph(rawData) {
             .lower();
 
         linkGroup.append('text')
-            .attr('x', first.x - padX + 6 + 9)
-            .attr('y', first.y - padY - 26)
+            .attr('x', zx + 15)
+            .attr('y', zy)
             .attr('dominant-baseline', 'middle')
             .attr('fill', zoneColor)
             .attr('font-size', '9.5px')
@@ -1273,16 +1301,17 @@ function updateGraph(rawData) {
 
         const laneOffset = link._lane || 0;
         const midX = (sx + tx) / 2;
+        const clampedOffset = s.col === t.col ? Math.max(-12, Math.min(12, laneOffset)) : laneOffset;
         let pathD;
         if (sy === ty) {
-            if (laneOffset === 0) {
+            if (clampedOffset === 0) {
                 pathD = `M${sx},${sy} L${tx},${ty}`;
             } else {
                 const bx = midX - 22;
-                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + laneOffset} L${bx + 44},${sy + laneOffset} L${bx + 44},${ty} L${tx},${ty}`;
+                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + clampedOffset} L${bx + 44},${sy + clampedOffset} L${bx + 44},${ty} L${tx},${ty}`;
             }
         } else {
-            pathD = `M${sx},${sy} L${midX + laneOffset},${sy} L${midX + laneOffset},${ty} L${tx},${ty}`;
+            pathD = `M${sx},${sy} L${midX + clampedOffset},${sy} L${midX + clampedOffset},${ty} L${tx},${ty}`;
         }
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
