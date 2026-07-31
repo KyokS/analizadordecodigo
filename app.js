@@ -906,7 +906,7 @@ function computeLayout(data) {
     const H = container.clientHeight;
 
     const NODE_W = 220, NODE_H = 64;
-    const H_GAP = 100, V_GAP = 30, MARGIN = 60;
+    const H_GAP = 130, V_GAP = 32, MARGIN = 60;
 
     const COLUMN_TYPES = [
         ['imported', 'template'],
@@ -1033,11 +1033,39 @@ function updateLinksForNode(nodeId, pos, data) {
     });
 }
 
+function computeMainChain(data, pos) {
+    const preds = new Map();
+    for (const n of data.nodes) preds.set(n.id, []);
+    for (const link of data.links) {
+        const s = pos[link.source], t = pos[link.target];
+        if (!s || !t) continue;
+        if (t.col > s.col) preds.get(link.target).push(link.source);
+    }
+    const sorted = [...data.nodes].sort((a, b) => pos[a.id].col - pos[b.id].col || a.line - b.line);
+    const dp = new Map(), prev = new Map();
+    let best = null;
+    for (const n of sorted) {
+        let len = 1, prevBest = null;
+        for (const p of preds.get(n.id)) {
+            if ((dp.get(p) || 0) + 1 > len) { len = dp.get(p) + 1; prevBest = p; }
+        }
+        dp.set(n.id, len);
+        prev.set(n.id, prevBest);
+        if (!best || len > dp.get(best)) best = n.id;
+    }
+    const chain = [];
+    let cur = best;
+    while (cur) { chain.unshift(cur); cur = prev.get(cur); }
+    return chain;
+}
+
 function updateGraph(data) {
     graphData = data;
     currentData = data;
     linkGroup.selectAll('*').remove();
     nodeGroup.selectAll('*').remove();
+    defs.selectAll('marker').remove();
+    const chainBadges = new Map();
 
     if (data.nodes.length === 0) {
         nodeGroup.append('text').attr('x', svg.attr('width') / 2).attr('y', svg.attr('height') / 2)
@@ -1078,6 +1106,7 @@ function updateGraph(data) {
     const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
     const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
 
+    const colGeom = {};
     for (let c = 0; c < 4; c++) {
         const colNodes = data.nodes.filter(n => pos[n.id] && pos[n.id].col === c);
         if (!colNodes.length) continue;
@@ -1087,25 +1116,26 @@ function updateGraph(data) {
         const padX = 20, padY = 16;
         const zoneColor = COLUMN_COLORS[c];
 
+        colGeom[c] = { left: first.x - padX, right: first.x + first.w + padX, top: first.y - padY - 34 };
+
         const zone = linkGroup.append('rect')
             .attr('x', first.x - padX)
             .attr('y', first.y - padY - 26)
             .attr('width', first.w + padX * 2)
             .attr('height', (last.y + last.h + padY) - (first.y - padY) + 26)
             .attr('rx', 14).attr('ry', 14)
-            .attr('fill', zoneColor + '08')
-            .attr('stroke', zoneColor + '30')
-            .attr('stroke-width', 1.2)
-            .attr('stroke-dasharray', '6,4')
+            .attr('fill', zoneColor + '05')
+            .attr('stroke', zoneColor + '22')
+            .attr('stroke-width', 1)
             .lower();
 
         zone.on('mouseover', function () {
-            d3.select(this).attr('fill', zoneColor + '14').attr('stroke', zoneColor + '55');
+            d3.select(this).attr('fill', zoneColor + '12').attr('stroke', zoneColor + '4d');
             nodeGroup.selectAll('g').attr('opacity', function (n) {
                 return pos[n.id] && pos[n.id].col === c ? 1 : 0.2;
             });
         }).on('mouseout', function () {
-            d3.select(this).attr('fill', zoneColor + '08').attr('stroke', zoneColor + '30');
+            d3.select(this).attr('fill', zoneColor + '05').attr('stroke', zoneColor + '22');
             nodeGroup.selectAll('g').attr('opacity', 1);
         });
 
@@ -1129,6 +1159,25 @@ function updateGraph(data) {
             .attr('font-weight', '700')
             .attr('letter-spacing', '1px')
             .text(COLUMN_LABELS[c])
+            .lower();
+    }
+
+    const flowArrowId = getFlowArrowId();
+    const flowCols = Object.keys(colGeom).map(Number).sort((a, b) => a - b);
+    for (let i = 0; i < flowCols.length - 1; i++) {
+        const from = colGeom[flowCols[i]], to = colGeom[flowCols[i + 1]];
+        const x1 = from.right + 12;
+        const x2 = to.left - 12;
+        if (x2 - x1 < 24) continue;
+        const fy = (from.top + to.top) / 2 + 8;
+        linkGroup.append('path')
+            .attr('d', `M${x1},${fy} L${x2},${fy}`)
+            .attr('fill', 'none')
+            .attr('stroke', '#94a3b8')
+            .attr('stroke-width', 2.5)
+            .attr('stroke-opacity', 0.3)
+            .attr('marker-end', `url(#${flowArrowId})`)
+            .attr('pointer-events', 'none')
             .lower();
     }
 
@@ -1175,15 +1224,20 @@ function updateGraph(data) {
         const strokeW = linkInfo.style === 'solid' ? 2.5 : 2;
         const linkColor = linkInfo.color || '#666';
 
+        const backward = s.col > t.col;
+        const finalColor = backward ? '#8b8fa3' : linkColor;
+        const finalOpacity = backward ? 0.28 : 0.55;
+        const finalDash = backward ? '4,4' : dashArray;
+
         const linkPath = linkGroup.append('path')
             .attr('d', pathD)
             .attr('fill', 'none')
-            .attr('stroke', linkColor)
+            .attr('stroke', finalColor)
             .attr('stroke-width', strokeW)
-            .attr('stroke-opacity', 0.5)
+            .attr('stroke-opacity', finalOpacity)
             .attr('stroke-linejoin', 'round')
-            .attr('stroke-dasharray', dashArray)
-            .attr('marker-end', `url(${getChainMarkerId(linkColor)})`)
+            .attr('stroke-dasharray', finalDash)
+            .attr('marker-end', `url(${getChainMarkerId(finalColor)})`)
             .style('cursor', 'pointer')
             .attr('data-source', link.source)
             .attr('data-target', link.target)
@@ -1204,11 +1258,13 @@ function updateGraph(data) {
                 });
             })
             .on('mouseout', function () {
-                d3.select(this).attr('stroke-opacity', 0.55).attr('stroke-width', strokeW);
+                d3.select(this).attr('stroke-opacity', finalOpacity).attr('stroke-width', strokeW);
                 hideLinkTooltip();
                 clearAllHighlights();
                 nodeGroup.selectAll('g').attr('opacity', 1);
             });
+
+        linkPath.node()._lane = link._lane;
 
         if (linkInfo) {
             const mx2 = (sx + tx) / 2;
@@ -1222,7 +1278,7 @@ function updateGraph(data) {
                 .attr('height', 18)
                 .attr('rx', 9)
                 .attr('fill', 'rgba(13, 13, 26, 0.9)')
-                .attr('stroke', linkColor + '40')
+                .attr('stroke', finalColor + '40')
                 .attr('stroke-width', 1)
                 .attr('opacity', 0)
                 .style('pointer-events', 'none');
@@ -1234,7 +1290,7 @@ function updateGraph(data) {
                 .attr('x', mx2 + 3).attr('y', my2 + lblOffset)
                 .attr('text-anchor', 'start')
                 .attr('dominant-baseline', 'middle')
-                .attr('fill', linkColor).attr('font-size', '8.5px').attr('font-weight', '600').attr('opacity', 0)
+                .attr('fill', finalColor).attr('font-size', '8.5px').attr('font-weight', '600').attr('opacity', 0)
                 .text(linkInfo.label)
                 .style('pointer-events', 'none');
 
@@ -1282,6 +1338,8 @@ function updateGraph(data) {
                     p.y += event.dy;
                     d3.select(this).attr('transform', `translate(${p.x},${p.y})`);
                     updateLinksForNode(d.id, pos, data);
+                    const b = chainBadges.get(d.id);
+                    if (b) b.attr('transform', `translate(${p.x + p.w - 12},${p.y - 8})`);
                 }
             })
             .on('end', function (event, d) {
@@ -1356,6 +1414,29 @@ function updateGraph(data) {
             .attr('cx', w - 16).attr('cy', 14)
             .attr('r', 5).attr('fill', c).attr('opacity', 0.5);
     });
+
+    const mainChain = computeMainChain(data, pos);
+    if (mainChain.length >= 2) {
+        mainChain.forEach((id, idx) => {
+            const p = pos[id];
+            if (!p) return;
+            const b = nodeGroup.append('g')
+                .attr('class', 'chain-badge')
+                .attr('transform', `translate(${p.x + p.w - 12},${p.y - 8})`)
+                .style('pointer-events', 'none');
+            b.append('circle')
+                .attr('r', 9.5)
+                .attr('fill', '#fbbf24')
+                .attr('stroke', '#111827')
+                .attr('stroke-width', 1.5);
+            b.append('text')
+                .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+                .attr('fill', '#111827').attr('font-size', '9.5px').attr('font-weight', '800')
+                .attr('font-family', "'Consolas',monospace")
+                .text(idx + 1);
+            chainBadges.set(id, b);
+        });
+    }
 
     updateLegend();
     setTimeout(autoFitZoom, 50);
@@ -1438,17 +1519,33 @@ function getChainMarkerId(color) {
 
     defs.append('marker')
         .attr('id', `chain-arrow-${color.replace('#', '')}`)
-        .attr('viewBox', '0 -6 16 12')
-        .attr('refX', 15)
+        .attr('viewBox', '0 -7 18 14')
+        .attr('refX', 16.5)
         .attr('refY', 0)
-        .attr('markerWidth', 16)
-        .attr('markerHeight', 16)
+        .attr('markerWidth', 18)
+        .attr('markerHeight', 18)
         .attr('orient', 'auto')
         .append('path')
-        .attr('d', 'M0,-7L16,0L0,7Z')
+        .attr('d', 'M0,-7L18,0L0,7Z')
         .attr('fill', color);
 
     return `url(#chain-arrow-${color.replace('#', '')})`;
+}
+
+function getFlowArrowId() {
+    if (document.getElementById('flow-arrow')) return 'flow-arrow';
+    defs.append('marker')
+        .attr('id', 'flow-arrow')
+        .attr('viewBox', '0 -8 20 16')
+        .attr('refX', 18)
+        .attr('refY', 0)
+        .attr('markerWidth', 20)
+        .attr('markerHeight', 20)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-8L20,0L0,8Z')
+        .attr('fill', '#94a3b8');
+    return 'flow-arrow';
 }
 
 function updateLinks(data, pos) {
@@ -1643,6 +1740,8 @@ function updateLegend() {
         const dashStyle = meta.style === 'dashed' ? 'dashed' : meta.style === 'dotted' ? 'dotted' : 'solid';
         return `<div class="legend-item"><div class="legend-line" style="--line-color:${meta.color};border-top:2px ${dashStyle} ${meta.color}"></div><span>${meta.label}</span></div>`;
     }).join('');
+    html += '<div class="legend-item"><div class="legend-line" style="--line-color:#8b8fa3;border-top:2px dashed #8b8fa3"></div><span>Enlace inverso (va hacia atrás)</span></div>';
+    html += '<div class="legend-item"><div class="legend-color" style="background:#fbbf24"></div><span>Paso N: orden de ejecución principal</span></div>';
     html += '</div>';
 
     document.getElementById('legend').innerHTML = html;
