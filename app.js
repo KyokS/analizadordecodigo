@@ -967,8 +967,8 @@ function computeLayout(data) {
     const W = container.clientWidth;
     const H = container.clientHeight;
 
-    const NODE_W = 240, NODE_H = 72;
-    const H_GAP = 110, SUB_GAP = 40, V_GAP = 34, MARGIN = 60;
+    const NODE_W = 250, NODE_H = 82;
+    const H_GAP = 160, SUB_GAP = 64, V_GAP = 56, MARGIN = 80;
     const MAX_ROWS = 6;
 
     const columns = COLUMN_TYPES.map(() => []);
@@ -1259,7 +1259,7 @@ function updateGraph(rawData) {
             nodeGroup.selectAll('g').attr('opacity', 1);
         });
 
-        const pillW = COLUMN_LABELS[c].length * 7 + 26;
+        const pillW = COLUMN_LABELS[c].length * 8.5 + 30;
         linkGroup.append('rect')
             .attr('x', zx + 6)
             .attr('y', zy - 8)
@@ -1284,7 +1284,7 @@ function updateGraph(rawData) {
             .attr('y', zy)
             .attr('dominant-baseline', 'middle')
             .attr('fill', zoneColor)
-            .attr('font-size', '9.5px')
+            .attr('font-size', '11px')
             .attr('font-weight', '700')
             .attr('letter-spacing', '1px')
             .text(COLUMN_LABELS[c])
@@ -1300,7 +1300,7 @@ function updateGraph(rawData) {
         laneMap.get(key).push(link);
     }
     for (const ls of laneMap.values()) {
-        const step = ls.length > 6 ? 16 : ls.length > 3 ? 20 : 24;
+        const step = ls.length > 6 ? 20 : ls.length > 3 ? 26 : 30;
         ls.forEach((l, i) => {
             l._lane = (i - (ls.length - 1) / 2) * step;
             l._laneN = ls.length;
@@ -1341,7 +1341,7 @@ function updateGraph(rawData) {
         const backward = s.col > t.col;
         const farJump = Math.abs(t.col - s.col) > 1;
         const finalColor = backward || farJump ? '#8b8fa3' : varyColor(linkColor, link._laneI || 0, link._laneN || 1);
-        const finalOpacity = farJump ? 0.12 : backward ? 0.25 : 0.4;
+        const finalOpacity = farJump ? 0.15 : backward ? 0.3 : 0.5;
         const finalDash = backward || farJump ? '6,4' : dashArray;
         const strokeW = backward || farJump ? 1.5 : linkInfo.style === 'solid' ? 2.5 : 2;
 
@@ -1394,7 +1394,7 @@ function updateGraph(rawData) {
             const labelBg = linkGroup.append('rect')
                 .attr('x', mx2 - 4)
                 .attr('y', my2 + lblOffset - 10)
-                .attr('width', linkInfo.label.length * 5.2 + 14)
+                .attr('width', linkInfo.label.length * 5.8 + 16)
                 .attr('height', 18)
                 .attr('rx', 9)
                 .attr('fill', 'rgba(13, 13, 26, 0.9)')
@@ -1410,7 +1410,7 @@ function updateGraph(rawData) {
                 .attr('x', mx2 + 3).attr('y', my2 + lblOffset)
                 .attr('text-anchor', 'start')
                 .attr('dominant-baseline', 'middle')
-                .attr('fill', finalColor).attr('font-size', '8.5px').attr('font-weight', '600').attr('opacity', 0)
+                .attr('fill', finalColor).attr('font-size', '9.5px').attr('font-weight', '600').attr('opacity', 0)
                 .text(linkInfo.label)
                 .style('pointer-events', 'none');
 
@@ -1518,28 +1518,28 @@ function updateGraph(rawData) {
         vis.append('text')
             .attr('x', 26).attr('y', 24)
             .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-            .attr('fill', c).attr('font-size', '12px').attr('font-weight', '800')
+            .attr('fill', c).attr('font-size', '13px').attr('font-weight', '800')
             .attr('font-family', "'Consolas',monospace")
             .text(isExtra ? '+' : (iconMap[d.type] || '?'));
 
         vis.append('text')
             .attr('x', 46).attr('y', 24)
             .attr('dominant-baseline', 'middle')
-            .attr('fill', '#ffffff').attr('font-size', '12.5px')
+            .attr('fill', '#ffffff').attr('font-size', '13.5px')
             .attr('font-family', "'Consolas','Fira Code',monospace").attr('font-weight', '700')
-            .text(isExtra ? '+' + d.extraCount + ' más' : (d.id.length > 17 ? d.id.substring(0, 14) + '...' : d.id));
+            .text(isExtra ? '+' + d.extraCount + ' más' : (d.id.length > 19 ? d.id.substring(0, 16) + '...' : d.id));
 
         vis.append('text')
-            .attr('x', 14).attr('y', 50)
+            .attr('x', 14).attr('y', 60)
             .attr('dominant-baseline', 'middle')
-            .attr('fill', c).attr('font-size', '9.5px').attr('font-weight', '600')
-            .attr('opacity', 0.65)
+            .attr('fill', c).attr('font-size', '10.5px').attr('font-weight', '600')
+            .attr('opacity', 0.75)
             .text(isExtra ? 'Clic para mostrar' : (TYPE_LABELS[d.type] || d.type));
 
         vis.append('text')
-            .attr('x', w - 16).attr('y', 50)
+            .attr('x', w - 16).attr('y', 60)
             .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-            .attr('fill', '#666').attr('font-size', '9px')
+            .attr('fill', '#8a94a8').attr('font-size', '10px')
             .text(isExtra ? '' : (d.line !== undefined ? 'L' + (d.line + 1) : ''));
 
         vis.append('circle')
