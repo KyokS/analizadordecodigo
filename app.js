@@ -1087,28 +1087,62 @@ function updateLinksForNode(nodeId, pos, data) {
         const s = pos[src], t = pos[tgt];
         if (!s || !t) return;
 
-        const sx = s.x + s.w;
-        const sy = s.y + s.h / 2;
-        const tx = t.x;
-        const ty = t.y + t.h / 2;
-
-        const midX = (sx + tx) / 2;
-        const laneOffset = this._lane || 0;
-        const clampedOffset = s.col === t.col ? Math.max(-12, Math.min(12, laneOffset)) : laneOffset;
-        let pathD;
-        if (sy === ty) {
-            if (clampedOffset === 0) {
-                pathD = `M${sx},${sy} L${tx},${ty}`;
-            } else {
-                const bx = midX - 22;
-                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + clampedOffset} L${bx + 44},${sy + clampedOffset} L${bx + 44},${ty} L${tx},${ty}`;
-            }
-        } else {
-            pathD = `M${sx},${sy} L${midX + clampedOffset},${sy} L${midX + clampedOffset},${ty} L${tx},${ty}`;
-        }
+        const o = this._pathInfo || { lane: 0, fanS: 0, fanT: 0, laneSmall: 0, laneY: 0, longRange: false };
+        const pathD = buildLinkPath(s, t, o);
 
         d3.select(this).attr('d', pathD);
     });
+}
+
+function buildLinkPath(s, t, o) {
+    const sy = s.y + s.h / 2 + o.fanS * 5;
+    const ty = t.y + t.h / 2 + o.fanT * 5;
+    if (o.longRange) {
+        const ex = s.x + s.w + 6 + o.fanS * 7;
+        const en = t.x - 6 - o.fanT * 7;
+        const ly = o.laneY + o.laneSmall;
+        return `M ${ex},${sy} L ${ex},${ly} L ${en},${ly} L ${en},${ty} L ${t.x},${ty}`;
+    }
+    const sx = s.x + s.w;
+    const tx = t.x;
+    if (sy === ty) return `M ${sx},${sy} L ${tx},${ty}`;
+    const midX = (sx + tx) / 2 + o.lane;
+    return `M ${sx},${sy} L ${midX},${sy} L ${midX},${ty} L ${tx},${ty}`;
+}
+
+function getZoneGradId(c) {
+    const id = `zone-grad-${c}`;
+    if (document.getElementById(id)) return id;
+    const grad = defs.append('linearGradient').attr('id', id).attr('x1', '0%').attr('y1', '0%').attr('x2', '0%').attr('y2', '100%');
+    grad.append('stop').attr('offset', '0%').attr('stop-color', COLUMN_COLORS[c]).attr('stop-opacity', 0.16);
+    grad.append('stop').attr('offset', '100%').attr('stop-color', COLUMN_COLORS[c]).attr('stop-opacity', 0.02);
+    return id;
+}
+
+function getNodeGradId(c) {
+    const id = `node-grad-${c.replace('#', '')}`;
+    if (document.getElementById(id)) return id;
+    const grad = defs.append('linearGradient').attr('id', id).attr('x1', '0%').attr('y1', '0%').attr('x2', '0%').attr('y2', '100%');
+    grad.append('stop').attr('offset', '0%').attr('stop-color', c).attr('stop-opacity', 0.30);
+    grad.append('stop').attr('offset', '100%').attr('stop-color', '#0a0e18').attr('stop-opacity', 1);
+    return id;
+}
+
+function getNodeHiId() {
+    if (document.getElementById('node-hi')) return 'node-hi';
+    const grad = defs.append('linearGradient').attr('id', 'node-hi').attr('x1', '0%').attr('y1', '0%').attr('x2', '0%').attr('y2', '100%');
+    grad.append('stop').attr('offset', '0%').attr('stop-color', '#ffffff').attr('stop-opacity', 0.14);
+    grad.append('stop').attr('offset', '100%').attr('stop-color', '#ffffff').attr('stop-opacity', 0);
+    return 'node-hi';
+}
+
+function getFlowGradId(ca, cb, x1, x2) {
+    const id = `flow-grad-${ca.replace('#', '')}-${cb.replace('#', '')}`;
+    if (document.getElementById(id)) return id;
+    const grad = defs.append('linearGradient').attr('id', id).attr('gradientUnits', 'userSpaceOnUse').attr('x1', x1).attr('y1', 0).attr('x2', x2).attr('y2', 0);
+    grad.append('stop').attr('offset', '0%').attr('stop-color', ca).attr('stop-opacity', 0.6);
+    grad.append('stop').attr('offset', '100%').attr('stop-color', cb).attr('stop-opacity', 0.6);
+    return id;
 }
 
 function computeMainChain(data, pos) {
@@ -1210,26 +1244,32 @@ function updateGraph(rawData) {
             .attr('y', zy)
             .attr('width', zw)
             .attr('height', zh)
-            .attr('rx', 14).attr('ry', 14)
-            .attr('fill', zoneColor + '05')
-            .attr('stroke', zoneColor + '22')
+            .attr('rx', 16).attr('ry', 16)
+            .attr('fill', `url(#${getZoneGradId(c)})`)
+            .attr('stroke', zoneColor + '30')
             .attr('stroke-width', 1)
+            .style('filter', `drop-shadow(0 0 22px ${zoneColor}18)`)
             .lower();
 
         zone.on('mouseover', function () {
-            d3.select(this).attr('fill', zoneColor + '12').attr('stroke', zoneColor + '4d');
+            d3.select(this)
+                .attr('stroke', zoneColor + '55')
+                .style('filter', `drop-shadow(0 0 30px ${zoneColor}38)`);
             nodeGroup.selectAll('g').attr('opacity', function (n) {
                 return pos[n.id] && pos[n.id].col === c ? 1 : 0.2;
             });
         }).on('mouseout', function () {
-            d3.select(this).attr('fill', zoneColor + '05').attr('stroke', zoneColor + '22');
+            d3.select(this)
+                .attr('stroke', zoneColor + '30')
+                .style('filter', `drop-shadow(0 0 22px ${zoneColor}18)`);
             nodeGroup.selectAll('g').attr('opacity', 1);
         });
 
+        const pillW = COLUMN_LABELS[c].length * 7 + 26;
         linkGroup.append('rect')
             .attr('x', zx + 6)
             .attr('y', zy - 8)
-            .attr('width', COLUMN_LABELS[c].length * 7 + 18)
+            .attr('width', pillW)
             .attr('height', 16)
             .attr('rx', 8)
             .attr('fill', zoneColor + '2e')
@@ -1237,8 +1277,16 @@ function updateGraph(rawData) {
             .attr('stroke-width', 1)
             .lower();
 
+        linkGroup.append('circle')
+            .attr('cx', zx + 6 + 9)
+            .attr('cy', zy)
+            .attr('r', 3.5)
+            .attr('fill', zoneColor)
+            .attr('opacity', 0.9)
+            .lower();
+
         linkGroup.append('text')
-            .attr('x', zx + 15)
+            .attr('x', zx + 6 + 19)
             .attr('y', zy)
             .attr('dominant-baseline', 'middle')
             .attr('fill', zoneColor)
@@ -1258,12 +1306,14 @@ function updateGraph(rawData) {
         const fy = (from.top + to.top) / 2 + 8;
         const blend = d3.interpolateRgb(COLUMN_COLORS[flowCols[i]], COLUMN_COLORS[flowCols[i + 1]])(0.5);
         const faId = getFlowArrowId(blend, `${flowCols[i]}-${flowCols[i + 1]}`);
+        const fgId = getFlowGradId(COLUMN_COLORS[flowCols[i]], COLUMN_COLORS[flowCols[i + 1]], x1, x2);
         linkGroup.append('path')
             .attr('d', `M${x1},${fy} L${x2},${fy}`)
             .attr('fill', 'none')
-            .attr('stroke', blend)
+            .attr('stroke', `url(#${fgId})`)
             .attr('stroke-width', 2.5)
-            .attr('stroke-opacity', 0.5)
+            .attr('stroke-opacity', 1)
+            .attr('stroke-linecap', 'round')
             .attr('marker-end', `url(#${faId})`)
             .attr('pointer-events', 'none')
             .lower();
@@ -1286,6 +1336,18 @@ function updateGraph(rawData) {
         });
     }
 
+    const serviceLaneY = Math.min.apply(null, Object.values(pos).map(p => p.y)) - 80;
+
+    const srcFan = new Map(), tgtFan = new Map();
+    for (const link of data.links) {
+        if (!srcFan.has(link.source)) srcFan.set(link.source, []);
+        srcFan.get(link.source).push(link);
+        if (!tgtFan.has(link.target)) tgtFan.set(link.target, []);
+        tgtFan.get(link.target).push(link);
+    }
+    for (const arr of srcFan.values()) arr.forEach((l, i) => { l._fanS = i; l._fanSN = arr.length; });
+    for (const arr of tgtFan.values()) arr.forEach((l, i) => { l._fanT = i; l._fanTN = arr.length; });
+
     for (const link of data.links) {
         const s = pos[link.source], t = pos[link.target];
         if (!s || !t) continue;
@@ -1299,20 +1361,11 @@ function updateGraph(rawData) {
         const tx = t.x;
         const ty = t.y + t.h / 2;
 
-        const laneOffset = link._lane || 0;
-        const midX = (sx + tx) / 2;
-        const clampedOffset = s.col === t.col ? Math.max(-12, Math.min(12, laneOffset)) : laneOffset;
-        let pathD;
-        if (sy === ty) {
-            if (clampedOffset === 0) {
-                pathD = `M${sx},${sy} L${tx},${ty}`;
-            } else {
-                const bx = midX - 22;
-                pathD = `M${sx},${sy} L${bx},${sy} L${bx},${sy + clampedOffset} L${bx + 44},${sy + clampedOffset} L${bx + 44},${ty} L${tx},${ty}`;
-            }
-        } else {
-            pathD = `M${sx},${sy} L${midX + clampedOffset},${sy} L${midX + clampedOffset},${ty} L${tx},${ty}`;
-        }
+        const fanS = (link._fanS || 0) - ((link._fanSN || 1) - 1) / 2;
+        const fanT = (link._fanT || 0) - ((link._fanTN || 1) - 1) / 2;
+        const laneSmall = ((link._laneI || 0) - ((link._laneN || 1) - 1) / 2) * 6;
+        const longRange = s.col === t.col || Math.abs(t.col - s.col) > 1;
+        const pathD = buildLinkPath(s, t, { lane: link._lane || 0, fanS, fanT, laneSmall, laneY: serviceLaneY, longRange });
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
         const strokeW = linkInfo.style === 'solid' ? 3 : 2.5;
@@ -1329,9 +1382,11 @@ function updateGraph(rawData) {
             .attr('stroke', finalColor)
             .attr('stroke-width', strokeW)
             .attr('stroke-opacity', finalOpacity)
+            .attr('stroke-linecap', 'round')
             .attr('stroke-linejoin', 'round')
             .attr('stroke-dasharray', finalDash)
             .attr('marker-end', `url(${getChainMarkerId(finalColor)})`)
+            .attr('class', !backward && finalDash !== 'none' ? 'link-anim' : null)
             .style('cursor', 'pointer')
             .attr('data-source', link.source)
             .attr('data-target', link.target)
@@ -1358,7 +1413,7 @@ function updateGraph(rawData) {
                 nodeGroup.selectAll('g').attr('opacity', 1);
             });
 
-        linkPath.node()._lane = link._lane;
+        linkPath.node()._pathInfo = { lane: link._lane || 0, fanS, fanT, laneSmall, laneY: serviceLaneY, longRange };
 
         if (linkInfo) {
             const mx2 = (sx + tx) / 2;
@@ -1447,7 +1502,7 @@ function updateGraph(rawData) {
                 d3.select(this).style('cursor', 'grab');
             }));
 
-    ng.each(function (d) {
+    ng.each(function (d, i) {
         const g = d3.select(this);
         const p = pos[d.id];
         const w = p ? p.w : 240;
@@ -1455,67 +1510,81 @@ function updateGraph(rawData) {
         const c = d.color;
         const isExtra = d.extraCount !== undefined;
 
-        g.append('rect')
+        const vis = g.append('g')
+            .attr('class', 'node-vis')
+            .style('--glow', c + '4d')
+            .style('animation-delay', (i * 16) + 'ms');
+
+        vis.append('rect')
             .attr('width', w).attr('height', h)
             .attr('rx', 10).attr('ry', 10)
-            .attr('fill', '#111827')
-            .attr('stroke', isExtra ? c + 'aa' : c + '60')
+            .attr('fill', `url(#${getNodeGradId(c)})`)
+            .attr('stroke', isExtra ? c + 'aa' : c + '66')
             .attr('stroke-width', 1.5)
-            .attr('stroke-dasharray', isExtra ? '6,4' : 'none')
-            .style('filter', 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))');
+            .attr('stroke-dasharray', isExtra ? '6,4' : 'none');
 
-        g.append('rect')
+        vis.append('rect')
+            .attr('width', w - 20).attr('height', 2)
+            .attr('x', 10).attr('y', 0)
+            .attr('rx', 1)
+            .attr('fill', `url(#${getNodeHiId()})`);
+
+        vis.append('rect')
             .attr('width', 5).attr('height', h - 8)
             .attr('x', 0).attr('y', 4)
             .attr('rx', 2.5).attr('ry', 2.5)
-            .attr('fill', c);
+            .attr('fill', c)
+            .style('filter', `drop-shadow(0 0 6px ${c}80)`);
 
-        g.append('rect')
+        vis.append('rect')
             .attr('x', 14).attr('y', 12)
             .attr('width', 24).attr('height', 24)
             .attr('rx', 6).attr('ry', 6)
-            .attr('fill', c + '25')
-            .attr('stroke', c + '40')
+            .attr('fill', c + '22')
+            .attr('stroke', c + '55')
             .attr('stroke-width', 1);
 
-        g.append('text')
+        vis.append('text')
             .attr('x', 26).attr('y', 24)
             .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
             .attr('fill', c).attr('font-size', '12px').attr('font-weight', '800')
             .attr('font-family', "'Consolas',monospace")
             .text(isExtra ? '+' : (iconMap[d.type] || '?'));
 
-        g.append('text')
+        vis.append('text')
             .attr('x', 46).attr('y', 24)
             .attr('dominant-baseline', 'middle')
             .attr('fill', '#ffffff').attr('font-size', '12.5px')
             .attr('font-family', "'Consolas','Fira Code',monospace").attr('font-weight', '700')
             .text(isExtra ? '+' + d.extraCount + ' más' : (d.id.length > 17 ? d.id.substring(0, 14) + '...' : d.id));
 
-        g.append('text')
+        vis.append('text')
             .attr('x', 14).attr('y', 50)
             .attr('dominant-baseline', 'middle')
             .attr('fill', c).attr('font-size', '9.5px').attr('font-weight', '600')
             .attr('opacity', 0.65)
             .text(isExtra ? 'Clic para mostrar' : (TYPE_LABELS[d.type] || d.type));
 
-        g.append('text')
+        vis.append('text')
             .attr('x', w - 16).attr('y', 50)
             .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-            .attr('fill', '#555').attr('font-size', '9px')
+            .attr('fill', '#666').attr('font-size', '9px')
             .text(isExtra ? '' : (d.line !== undefined ? 'L' + (d.line + 1) : ''));
 
-        g.append('circle')
+        vis.append('circle')
             .attr('cx', 6).attr('cy', h / 2)
-            .attr('r', 4).attr('fill', c).attr('opacity', 0.35);
+            .attr('r', 4).attr('fill', c).attr('opacity', 0.5)
+            .style('filter', `drop-shadow(0 0 4px ${c}aa)`);
 
-        g.append('circle')
+        vis.append('circle')
             .attr('cx', w - 6).attr('cy', h / 2)
-            .attr('r', 4).attr('fill', c).attr('opacity', 0.35);
+            .attr('r', 4).attr('fill', c).attr('opacity', 0.5)
+            .style('filter', `drop-shadow(0 0 4px ${c}aa)`);
 
-        g.append('circle')
+        vis.append('circle')
             .attr('cx', w - 16).attr('cy', 16)
-            .attr('r', 5).attr('fill', c).attr('opacity', 0.5);
+            .attr('r', 5).attr('fill', c).attr('opacity', 0.5)
+            .style('filter', `drop-shadow(0 0 5px ${c}aa)`);
     });
 
     const mainChain = computeMainChain(data, pos);
@@ -1531,7 +1600,8 @@ function updateGraph(rawData) {
                 .attr('r', 9.5)
                 .attr('fill', '#fbbf24')
                 .attr('stroke', '#111827')
-                .attr('stroke-width', 1.5);
+                .attr('stroke-width', 1.5)
+                .style('filter', 'drop-shadow(0 0 8px rgba(251,191,36,0.85))');
             b.append('text')
                 .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
                 .attr('fill', '#111827').attr('font-size', '9.5px').attr('font-weight', '800')
