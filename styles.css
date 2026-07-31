@@ -683,7 +683,7 @@ path[data-source][stroke-dasharray="4,4"] {
     border-radius: 12px;
     padding: 14px 18px;
     z-index: 200;
-    pointer-events: none;
+    pointer-events: auto;
     max-width: 380px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(0, 217, 255, 0.1);
     animation: tooltipIn 0.2s ease-out;
