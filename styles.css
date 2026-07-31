@@ -138,6 +138,17 @@ body {
     background: rgba(13, 13, 26, 0.6) !important;
 }
 
+.highlight-line {
+    background: rgba(0, 217, 255, 0.15) !important;
+    border-left: 3px solid #00d9ff !important;
+    animation: lineFlash 2s ease-out;
+}
+
+@keyframes lineFlash {
+    0% { background: rgba(0, 217, 255, 0.4); }
+    100% { background: rgba(0, 217, 255, 0.15); }
+}
+
 .btn-close {
     width: 24px; height: 24px;
     background: none; border: none;
@@ -255,77 +266,6 @@ body {
     cursor: pointer;
 }
 .connection-tag:hover { transform: translateY(-1px); }
-
-/* Stats overlay */
-.stats-overlay {
-    position: fixed;
-    bottom: 12px; right: 12px;
-    width: 300px;
-    max-height: 280px;
-    background: rgba(22, 33, 62, 0.92);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(0, 217, 255, 0.2);
-    border-radius: 12px;
-    z-index: 90;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s;
-}
-
-.stats-overlay.hidden {
-    transform: translateY(300px);
-    opacity: 0;
-    pointer-events: none;
-}
-
-.stats-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 14px;
-    background: rgba(15, 52, 96, 0.5);
-    border-bottom: 1px solid rgba(0, 217, 255, 0.1);
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #00d9ff;
-}
-
-#stats-content {
-    padding: 12px 14px;
-    overflow-y: auto;
-}
-
-.stat-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-}
-
-.stat-card {
-    background: rgba(13, 13, 26, 0.5);
-    border-radius: 6px;
-    padding: 8px;
-    text-align: center;
-    border: 1px solid rgba(0, 217, 255, 0.1);
-}
-
-.stat-number {
-    font-size: 1.3rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #00d9ff, #00ff88);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.stat-label {
-    font-size: 0.6rem;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
-}
 
 /* Unrecognized overlay */
 .unrecognized-overlay {

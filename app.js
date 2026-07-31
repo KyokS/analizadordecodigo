@@ -770,13 +770,13 @@ function initGraph() {
 
     const markerColors = ['#ff6b6b','#4ecdc4','#ffd93d','#c084fc','#60a5fa','#34d399','#f97316','#a78bfa','#f472b6'];
     markerColors.forEach((c, i) => {
-        defs.append('marker').attr('id', `arrow-${i}`).attr('viewBox', '0 -5 10 10').attr('refX', 10).attr('refY', 0)
-            .attr('markerWidth', 10).attr('markerHeight', 10).attr('orient', 'auto')
-            .append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', c);
+        defs.append('marker').attr('id', `arrow-${i}`).attr('viewBox', '0 -6 14 12').attr('refX', 13).attr('refY', 0)
+            .attr('markerWidth', 14).attr('markerHeight', 14).attr('orient', 'auto')
+            .append('path').attr('d', 'M0,-6L14,0L0,6Z').attr('fill', c);
     });
-    defs.append('marker').attr('id', 'arrow-default').attr('viewBox', '0 -5 10 10').attr('refX', 10).attr('refY', 0)
-        .attr('markerWidth', 10).attr('markerHeight', 10).attr('orient', 'auto')
-        .append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', '#666');
+    defs.append('marker').attr('id', 'arrow-default').attr('viewBox', '0 -6 14 12').attr('refX', 13).attr('refY', 0)
+        .attr('markerWidth', 14).attr('markerHeight', 14).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,-6L14,0L0,6Z').attr('fill', '#666');
 
     const zoom = d3.zoom().scaleExtent([0.15, 3]).on('zoom', (e) => mainGroup.attr('transform', e.transform));
     svg.call(zoom);
@@ -801,15 +801,6 @@ function initGraph() {
 
     document.getElementById('closeEditor').addEventListener('click', () => {
         document.getElementById('editorOverlay').classList.add('hidden');
-    });
-
-    document.getElementById('toggleStats').addEventListener('click', () => {
-        document.getElementById('statsOverlay').classList.toggle('hidden');
-        document.getElementById('toggleStats').classList.toggle('active');
-    });
-    document.getElementById('closeStats').addEventListener('click', () => {
-        document.getElementById('statsOverlay').classList.add('hidden');
-        document.getElementById('toggleStats').classList.remove('active');
     });
 
     document.getElementById('toggleUnrecognized').addEventListener('click', () => {
@@ -1058,7 +1049,7 @@ function updateGraph(data) {
             const linkInfo = getLinkInfo(sourceNode, targetNode, linkData ? linkData.linkType : 'uses');
 
             const dashArray = linkInfo.style === 'dashed' ? '8,4' : linkInfo.style === 'dotted' ? '3,3' : 'none';
-            const strokeW = linkInfo.style === 'solid' ? 3 : 2.5;
+            const strokeW = linkInfo.style === 'solid' ? 4 : 3;
             const linkColor = linkInfo.color || chainColor;
 
             const linkPath = linkGroup.append('path')
@@ -1120,7 +1111,7 @@ function updateGraph(data) {
         .attr('transform', d => { const p = pos[d.id]; return p ? `translate(${p.x},${p.y})` : 'translate(0,0)'; })
         .style('cursor', 'pointer')
         .on('click', (e, d) => showNodeInfo(d))
-        .on('mouseover', function (e, d) { highlightNode(d); })
+        .on('mouseover', function (e, d) { highlightNode(d); highlightNodeCode(d); })
         .on('mouseout', function () { resetHighlight(); })
         .call(d3.drag()
             .on('start', function () { d3.select(this).raise(); })
@@ -1265,14 +1256,14 @@ function getChainMarkerId(color) {
 
     defs.append('marker')
         .attr('id', `chain-arrow-${color.replace('#', '')}`)
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 12)
+        .attr('viewBox', '0 -6 16 12')
+        .attr('refX', 15)
         .attr('refY', 0)
-        .attr('markerWidth', 12)
-        .attr('markerHeight', 12)
+        .attr('markerWidth', 16)
+        .attr('markerHeight', 16)
         .attr('orient', 'auto')
         .append('path')
-        .attr('d', 'M0,-5L12,0L0,5')
+        .attr('d', 'M0,-7L16,0L0,7Z')
         .attr('fill', color);
 
     return `url(#chain-arrow-${color.replace('#', '')})`;
@@ -1312,6 +1303,21 @@ function resetHighlight() {
     linkGroup.selectAll('path').attr('stroke-opacity', 0.5).attr('stroke-width', 3);
     linkGroup.selectAll('rect').attr('opacity', 1);
     linkGroup.selectAll('text').attr('opacity', 1);
+}
+
+function highlightCodeLine(lineNum) {
+    if (!editor || lineNum === undefined) return;
+    editor.addLineClass(lineNum, 'background', 'highlight-line');
+    editor.scrollIntoView({ line: lineNum, ch: 0 }, 100);
+    setTimeout(() => {
+        editor.removeLineClass(lineNum, 'background', 'highlight-line');
+    }, 2000);
+}
+
+function highlightNodeCode(d) {
+    if (d.line !== undefined) {
+        highlightCodeLine(d.line);
+    }
 }
 
 function showNodeInfo(d) {
@@ -1455,62 +1461,6 @@ function detectUnrecognizedBlocks(code, language) {
     return unrecognized;
 }
 
-function updateStats(data, code, language) {
-    const statsEl = document.getElementById('stats-content');
-    const typeCounts = {};
-
-    data.nodes.forEach(n => {
-        typeCounts[n.type] = (typeCounts[n.type] || 0) + 1;
-    });
-
-    const totalNodes = data.nodes.length;
-    const totalLinks = data.links.length;
-    const chains = buildChains(data);
-    const totalChains = chains.length;
-
-    const codeLines = code.split('\n').length;
-    const codeChars = code.length;
-
-    statsEl.innerHTML = `
-        <div class="stat-grid">
-            <div class="stat-card">
-                <div class="stat-number">${totalNodes}</div>
-                <div class="stat-label">Elementos</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${totalLinks}</div>
-                <div class="stat-label">Conexiones</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${totalChains}</div>
-                <div class="stat-label">Cadenas</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${codeLines}</div>
-                <div class="stat-label">Líneas</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${Object.keys(typeCounts).length}</div>
-                <div class="stat-label">Tipos</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${(codeChars / 1024).toFixed(1)}K</div>
-                <div class="stat-label">Caracteres</div>
-            </div>
-        </div>
-        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #0f3460;">
-            <div style="font-size: 0.8rem; color: #888; margin-bottom: 8px;">Distribución por tipo:</div>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                ${Object.entries(typeCounts).map(([type, count]) => `
-                    <span style="background:${COLORS[type] || COLORS.default}22; color:${COLORS[type] || COLORS.default}; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; border: 1px solid ${COLORS[type] || COLORS.default}44;">
-                        ${TYPE_LABELS[type] || type}: ${count}
-                    </span>
-                `).join('')}
-            </div>
-        </div>
-    `;
-}
-
 function updateUnrecognized(code, language) {
     const unrecognizedEl = document.getElementById('unrecognized-content');
     const blocks = detectUnrecognizedBlocks(code, language);
@@ -1555,11 +1505,9 @@ function analyze() {
     if (code.trim()) {
         const data = analyzeCode(code, analyzerLang);
         updateGraph(data);
-        updateStats(data, code, analyzerLang);
         updateUnrecognized(code, analyzerLang);
     } else {
         updateGraph({ nodes: [], links: [] });
-        document.getElementById('stats-content').innerHTML = '<p class="hint">Analiza código para ver estadísticas</p>';
         document.getElementById('unrecognized-content').innerHTML = '<p class="hint">Los bloques sin analizar aparecerán aquí</p>';
     }
 }
