@@ -904,15 +904,22 @@ function computeLayout(data) {
     const unassigned = data.nodes.filter(n => !assigned.has(n.id));
     if (unassigned.length) columns[columns.length - 1].push(...unassigned);
 
-    const totalCols = columns.length;
+    columns.forEach(col => col.sort((a, b) => (a.line || 0) - (b.line || 0)));
+
+    const nonEmpty = columns.filter(c => c.length > 0);
+    const totalCols = Math.max(nonEmpty.length, 1);
     const totalWidth = totalCols * NODE_W + (totalCols - 1) * H_GAP;
-    const startX = (W - totalWidth) / 2;
+    const startX = Math.max((W - totalWidth) / 2, MARGIN);
 
     const pos = {};
+    let colIdx = 0;
 
     for (let c = 0; c < totalCols; c++) {
-        const col = columns[c];
-        if (!col.length) continue;
+        while (colIdx < columns.length && columns[colIdx].length === 0) colIdx++;
+        if (colIdx >= columns.length) break;
+
+        const col = columns[colIdx];
+        colIdx++;
 
         const colX = startX + c * (NODE_W + H_GAP);
         const totalH = col.length * NODE_H + (col.length - 1) * V_GAP;
@@ -949,13 +956,13 @@ function getLinkInfo(source, target, linkType) {
 
     const linkTypeMap = {
         'uses': { label: `${sName} usa ${tName}`, desc: `${sName} depende de ${tName} para funcionar`, style: 'solid', color: '#00d9ff', icon: '→' },
-        'calls': { label: `${sName} llama a ${tName}`, desc: `${sName} ejecuta ${tName}`, style: 'solid', color: '#34d399', icon: '▶' },
-        'imports': { label: `${sName} importa ${tName}`, desc: `${sName} carga el módulo ${tName}`, style: 'dotted', color: '#a78bfa', icon: '◆' },
-        'provides': { label: `${sName} provee ${tName}`, desc: `Módulo ${sName} exporta ${tName}`, style: 'dotted', color: '#a78bfa', icon: '◇' },
-        'defines': { label: `${sName} define ${tName}`, desc: `${sName} contiene la definición de ${tName}`, style: 'solid', color: '#ffd93d', icon: '●' },
-        'depends': { label: `${sName} depende de ${tName}`, desc: `${sName} necesita ${tName}`, style: 'dashed', color: '#f97316', icon: '△' },
-        'receives': { label: `${sName} recibe ${tName}`, desc: `${sName} acepta parámetro ${tName}`, style: 'dashed', color: '#c084fc', icon: '⊃' },
-        'references': { label: `${sName} referencia ${tName}`, desc: `${sName} usa el valor de ${tName}`, style: 'solid', color: '#60a5fa', icon: '=' },
+        'calls': { label: `${sName} llama a ${tName}`, desc: `${sName} ejecuta ${tName}`, style: 'solid', color: '#ff4d6d', icon: '▶' },
+        'imports': { label: `${sName} importa ${tName}`, desc: `${sName} carga el módulo ${tName}`, style: 'dotted', color: '#8b5cf6', icon: '◆' },
+        'provides': { label: `${sName} provee ${tName}`, desc: `Módulo ${sName} exporta ${tName}`, style: 'dotted', color: '#f72585', icon: '◇' },
+        'defines': { label: `${sName} define ${tName}`, desc: `${sName} contiene la definición de ${tName}`, style: 'solid', color: '#ffd60a', icon: '●' },
+        'depends': { label: `${sName} depende de ${tName}`, desc: `${sName} necesita ${tName}`, style: 'dashed', color: '#fb8500', icon: '△' },
+        'receives': { label: `${sName} recibe ${tName}`, desc: `${sName} acepta parámetro ${tName}`, style: 'dashed', color: '#06d6a0', icon: '⊃' },
+        'references': { label: `${sName} referencia ${tName}`, desc: `${sName} usa el valor de ${tName}`, style: 'solid', color: '#3a86ff', icon: '=' },
     };
 
     return linkTypeMap[linkType] || {
@@ -976,22 +983,17 @@ function updateLinksForNode(nodeId, pos, data) {
         const s = pos[src], t = pos[tgt];
         if (!s || !t) return;
 
-        const sx = src === nodeId ? (d3.select(this).attr('d').match(/M([\d.]+)/) || [])[1] || s.x + s.w : s.x + s.w;
+        const sx = s.x + s.w;
         const sy = s.y + s.h / 2;
-        const tx = tgt === nodeId ? t.x : t.x;
+        const tx = t.x;
         const ty = t.y + t.h / 2;
 
-        const sourceNode = data.nodes.find(n => n.id === src);
-        const targetNode = data.nodes.find(n => n.id === tgt);
-        const linkData = data.links.find(l => l.source === src && l.target === tgt);
-        const linkInfo = getLinkInfo(sourceNode, targetNode, linkData ? linkData.linkType : 'uses');
-        const linkColor = linkInfo ? linkInfo.color : '#666';
+        const midX = (sx + tx) / 2;
+        const pathD = sy === ty
+            ? `M${sx},${sy} L${tx},${ty}`
+            : `M${sx},${sy} L${midX},${sy} L${midX},${ty} L${tx},${ty}`;
 
-        const dx = tx - sx;
-        const cp1x = sx + dx * 0.4;
-        const cp2x = tx - dx * 0.4;
-
-        d3.select(this).attr('d', `M${sx},${sy} C${cp1x},${sy} ${cp2x},${ty} ${tx},${ty}`);
+        d3.select(this).attr('d', pathD);
     });
 }
 
@@ -1037,7 +1039,8 @@ function updateGraph(data) {
     document.getElementById('resetZoom').onclick = () => svg.transition().duration(500).call(zoom.transform, initialTransform);
     window._graphZoom = zoom;
 
-    const COLUMN_LABELS = ['Imports', 'Variables', 'Clases / Funciones', 'Parámetros / Métodos'];
+    const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
+    const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
 
     for (let c = 0; c < 4; c++) {
         const colNodes = data.nodes.filter(n => pos[n.id] && pos[n.id].col === c);
@@ -1045,25 +1048,48 @@ function updateGraph(data) {
 
         const first = pos[colNodes[0].id];
         const last = pos[colNodes[colNodes.length - 1].id];
-        const padX = 16, padY = 14;
+        const padX = 20, padY = 16;
+        const zoneColor = COLUMN_COLORS[c];
 
-        linkGroup.append('rect')
+        const zone = linkGroup.append('rect')
             .attr('x', first.x - padX)
-            .attr('y', first.y - padY - 22)
+            .attr('y', first.y - padY - 26)
             .attr('width', first.w + padX * 2)
-            .attr('height', (last.y + last.h + padY) - (first.y - padY) + 22)
+            .attr('height', (last.y + last.h + padY) - (first.y - padY) + 26)
             .attr('rx', 14).attr('ry', 14)
-            .attr('fill', 'rgba(0, 217, 255, 0.02)')
-            .attr('stroke', 'rgba(0, 217, 255, 0.08)')
-            .attr('stroke-width', 1)
+            .attr('fill', zoneColor + '08')
+            .attr('stroke', zoneColor + '30')
+            .attr('stroke-width', 1.2)
             .attr('stroke-dasharray', '6,4')
             .lower();
 
+        zone.on('mouseover', function () {
+            d3.select(this).attr('fill', zoneColor + '14').attr('stroke', zoneColor + '55');
+            nodeGroup.selectAll('g').attr('opacity', function (n) {
+                return pos[n.id] && pos[n.id].col === c ? 1 : 0.2;
+            });
+        }).on('mouseout', function () {
+            d3.select(this).attr('fill', zoneColor + '08').attr('stroke', zoneColor + '30');
+            nodeGroup.selectAll('g').attr('opacity', 1);
+        });
+
+        linkGroup.append('rect')
+            .attr('x', first.x - padX + 6)
+            .attr('y', first.y - padY - 34)
+            .attr('width', COLUMN_LABELS[c].length * 7 + 18)
+            .attr('height', 16)
+            .attr('rx', 8)
+            .attr('fill', zoneColor + '2e')
+            .attr('stroke', zoneColor + '40')
+            .attr('stroke-width', 1)
+            .lower();
+
         linkGroup.append('text')
-            .attr('x', first.x - padX + 8)
-            .attr('y', first.y - padY - 10)
-            .attr('fill', 'rgba(0, 217, 255, 0.4)')
-            .attr('font-size', '9px')
+            .attr('x', first.x - padX + 6 + 9)
+            .attr('y', first.y - padY - 26)
+            .attr('dominant-baseline', 'middle')
+            .attr('fill', zoneColor)
+            .attr('font-size', '9.5px')
             .attr('font-weight', '700')
             .attr('letter-spacing', '1px')
             .text(COLUMN_LABELS[c])
@@ -1083,20 +1109,22 @@ function updateGraph(data) {
         const tx = t.x;
         const ty = t.y + t.h / 2;
 
-        const dx = tx - sx;
-        const cp1x = sx + dx * 0.4;
-        const cp2x = tx - dx * 0.4;
+        const midX = (sx + tx) / 2;
+        const pathD = sy === ty
+            ? `M${sx},${sy} L${tx},${ty}`
+            : `M${sx},${sy} L${midX},${sy} L${midX},${ty} L${tx},${ty}`;
 
         const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
-        const strokeW = linkInfo.style === 'solid' ? 3.5 : 2.5;
+        const strokeW = linkInfo.style === 'solid' ? 2.5 : 2;
         const linkColor = linkInfo.color || '#666';
 
         const linkPath = linkGroup.append('path')
-            .attr('d', `M${sx},${sy} C${cp1x},${sy} ${cp2x},${ty} ${tx},${ty}`)
+            .attr('d', pathD)
             .attr('fill', 'none')
             .attr('stroke', linkColor)
             .attr('stroke-width', strokeW)
-            .attr('stroke-opacity', 0.55)
+            .attr('stroke-opacity', 0.6)
+            .attr('stroke-linejoin', 'round')
             .attr('stroke-dasharray', dashArray)
             .attr('marker-end', `url(${getChainMarkerId(linkColor)})`)
             .style('cursor', 'pointer')
@@ -1535,6 +1563,28 @@ function updateLegend() {
         const icon = icons[t] || '?';
         const desc = typeDescriptions[t] || TYPE_LABELS[t] || t;
         return `<div class="legend-item"><div class="legend-color" style="background:${COLORS[t]||COLORS.default};display:flex;align-items:center;justify-content:center;color:#fff;font-size:8px;font-weight:700">${icon}</div><span>${TYPE_LABELS[t]||t} <span style="color:#666;font-size:0.7rem">- ${desc}</span></span></div>`;
+    }).join('');
+    html += '</div>';
+
+    const linkMeta = {
+        uses: { color: '#00d9ff', label: 'Usa', style: 'solid' },
+        calls: { color: '#ff4d6d', label: 'Llama', style: 'solid' },
+        imports: { color: '#8b5cf6', label: 'Importa', style: 'dotted' },
+        provides: { color: '#f72585', label: 'Provee', style: 'dotted' },
+        defines: { color: '#ffd60a', label: 'Define', style: 'solid' },
+        depends: { color: '#fb8500', label: 'Depende', style: 'dashed' },
+        receives: { color: '#06d6a0', label: 'Recibe', style: 'dashed' },
+        references: { color: '#3a86ff', label: 'Referencia', style: 'solid' },
+    };
+    const usedLinkTypes = new Set(graphData.links.map(l => l.linkType || 'uses'));
+    const showAll = usedLinkTypes.size === 0;
+    const relevant = showAll ? Object.keys(linkMeta) : Array.from(usedLinkTypes);
+
+    html += '<div class="legend-section"><span class="legend-title">Rutas:</span>';
+    html += relevant.map(lt => {
+        const meta = linkMeta[lt] || linkMeta.uses;
+        const dashStyle = meta.style === 'dashed' ? 'dashed' : meta.style === 'dotted' ? 'dotted' : 'solid';
+        return `<div class="legend-item"><div class="legend-line" style="--line-color:${meta.color};border-top:2px ${dashStyle} ${meta.color}"></div><span>${meta.label}</span></div>`;
     }).join('');
     html += '</div>';
 
