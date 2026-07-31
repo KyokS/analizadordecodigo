@@ -1364,7 +1364,7 @@ function updateGraph(rawData) {
             .on('mouseover', function (event) {
                 d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
                 clearAllHighlights();
-                showLinkTooltip(event, linkInfo, sourceNode, targetNode);
+                showLinkTooltip(event, linkInfo, sourceNode, targetNode, link);
                 if (sourceNode) {
                     if (sourceNode.line !== undefined) highlightCodeLine(sourceNode.line);
                     highlightIdentifier(sourceNode.id, sourceNode.color);
@@ -1379,7 +1379,7 @@ function updateGraph(rawData) {
             })
             .on('mouseout', function () {
                 d3.select(this).attr('stroke-opacity', finalOpacity).attr('stroke-width', strokeW);
-                hideLinkTooltip();
+                scheduleHideLinkTooltip();
                 clearAllHighlights();
                 nodeGroup.selectAll('g').attr('opacity', 1);
             });
@@ -1587,9 +1587,16 @@ function updateGraph(rawData) {
 }
 
 let linkTooltipEl = null;
+let linkTooltipTimer = null;
 
-function showLinkTooltip(event, linkInfo, sourceNode, targetNode) {
+function scheduleHideLinkTooltip() {
+    clearTimeout(linkTooltipTimer);
+    linkTooltipTimer = setTimeout(hideLinkTooltip, 400);
+}
+
+function showLinkTooltip(event, linkInfo, sourceNode, targetNode, link) {
     hideLinkTooltip();
+    window._linkExplain = { sourceNode, targetNode, linkInfo, link };
 
     linkTooltipEl = document.createElement('div');
     linkTooltipEl.className = 'link-tooltip';
@@ -1602,8 +1609,11 @@ function showLinkTooltip(event, linkInfo, sourceNode, targetNode) {
             <span class="lt-type" style="color:${targetNode.color}">${TYPE_LABELS[targetNode.type]}: ${targetNode.id}</span>
         </div>
         <div class="lt-hint">Estilo: ${linkInfo.style === 'solid' ? '— Relación directa' : linkInfo.style === 'dashed' ? '- - - Dependencia' : '··· Referencia'}</div>
+        <button id="explainLinkBtn" class="lt-explain">Explicar conexión con IA</button>
     `;
     document.body.appendChild(linkTooltipEl);
+    linkTooltipEl.addEventListener('mouseover', () => clearTimeout(linkTooltipTimer));
+    linkTooltipEl.addEventListener('mouseout', scheduleHideLinkTooltip);
 
     const x = event.clientX || event.pageX;
     const y = event.clientY || event.pageY;
@@ -1612,6 +1622,7 @@ function showLinkTooltip(event, linkInfo, sourceNode, targetNode) {
 }
 
 function hideLinkTooltip() {
+    clearTimeout(linkTooltipTimer);
     if (linkTooltipEl) {
         linkTooltipEl.remove();
         linkTooltipEl = null;
@@ -1884,7 +1895,12 @@ function showNodeInfo(d) {
             <div style="background:#0d0d1a;border-radius:6px;padding:8px 12px;margin-top:4px;border:1px solid #0f3460"><span style="color:#666;font-size:0.8rem;font-family:monospace;word-break:break-all">${d.context||'N/A'}</span></div>
             <div class="info-row" style="margin-top:10px"><span class="info-label">Conexiones (${d.connections.length}):</span></div>
             <div class="connections-list">${d.connections.length>0?d.connections.map(cn=>{const nd=graphData.nodes.find(n=>n.id===cn);const cc=nd?nd.color:'#94a3b8';const tl=nd?TYPE_LABELS[nd.type]||nd.type:'';return `<span class="connection-tag" style="background:${cc}22;color:${cc};border:1px solid ${cc}55" title="${tl}">${cn}</span>`}).join(''):'<span style="color:#666">Sin conexiones directas</span>'}</div>
+            <button id="explainNodeBtn" class="btn-mini ai-btn-mini">Explicar este elemento con IA</button>
         </div>`;
+
+    document.getElementById('explainNodeBtn').addEventListener('click', () => {
+        aiExplain(buildNodePrompt(d));
+    });
 }
 
 function updateLegend() {
@@ -2185,96 +2201,156 @@ async function callGemini(key, prompt) {
     throw new Error(lastErr || 'Error desconocido');
 }
 
+let aiLastText = '';
+
+function showAiPanel(html) {
+    const overlay = document.getElementById('aiOverlay');
+    const content = document.getElementById('ai-content');
+    if (!overlay || !content) return;
+    content.innerHTML = html;
+    aiLastText = content.innerText;
+    overlay.classList.remove('hidden');
+}
+
+function showAiKeyRequest(onSave) {
+    showAiPanel(
+        '<div class="ai-result">' +
+        '<h3>Explicar con IA (Gemini, gratis)</h3>' +
+        '<p class="ai-msg">Para que la IA explique necesitas una clave de API gratuita:</p>' +
+        '<ol class="ai-steps">' +
+        '<li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></li>' +
+        '<li>Pulsa <b>Create API key</b> y copia la clave.</li>' +
+        '<li>Pégala aquí abajo (se guarda solo en tu navegador, nunca sale de él).</li>' +
+        '</ol>' +
+        '<div class="ai-keyrow">' +
+        '<input id="aiKeyInput" type="password" placeholder="Pega aquí tu clave de Gemini..." />' +
+        '<button id="aiKeySave" class="btn-mini">Guardar y explicar</button>' +
+        '</div>' +
+        '<p class="ai-msg">¿Prefieres verla sin IA?</p>' +
+        '<button id="aiLocal" class="btn-mini">Explicación lógica local</button>' +
+        '</div>'
+    );
+    document.getElementById('aiKeySave').addEventListener('click', () => {
+        const k = document.getElementById('aiKeyInput').value.trim();
+        if (k) { localStorage.setItem('geminiKey', k); onSave(); }
+    });
+    document.getElementById('aiLocal').addEventListener('click', () => showAiPanel(buildLocalExplanation()));
+}
+
+function aiExplain(prompt) {
+    const key = localStorage.getItem('geminiKey') || '';
+    if (!key) { showAiKeyRequest(() => aiExplain(prompt)); return; }
+    showAiPanel('<div class="ai-loading"><span class="ai-spinner"></span> La IA está analizando...</div>');
+    callGemini(key, prompt)
+        .then(text => showAiPanel('<div class="ai-result">' + mdToHtml(text) + '</div>'))
+        .catch(err => {
+            showAiPanel('<div class="ai-error">⚠️ No pude conectar con Gemini: ' + err.message +
+                '<br><br><button id="aiRetry" class="btn-mini">Reintentar</button> ' +
+                '<button id="aiLocal2" class="btn-mini">Explicación local</button></div>');
+            document.getElementById('aiRetry').addEventListener('click', () => aiExplain(prompt));
+            document.getElementById('aiLocal2').addEventListener('click', () => showAiPanel(buildLocalExplanation()));
+        });
+}
+
+function buildWholePrompt(code) {
+    return [
+        'Explica QUÉ hace y CÓMO funciona este código.',
+        '',
+        'CÓDIGO:',
+        '```',
+        code.slice(0, 8000),
+        '```',
+        '',
+        'RESUMEN ESTRUCTURAL EXTRAÍDO AUTOMÁTICAMENTE:',
+        buildGraphSummary(),
+        '',
+        'Estructura la respuesta en:',
+        '1) Propósito general (1-2 frases)',
+        '2) Piezas principales y su papel lógico',
+        '3) Lógica y flujo de ejecución paso a paso',
+        '4) Conexiones clave entre piezas',
+        '5) Posibles mejoras o riesgos',
+        'Sé concreto y menciona los nombres reales de variables, funciones y clases.'
+    ].join('\n');
+}
+
+function buildNodePrompt(d) {
+    const code = editor ? editor.getValue() : '';
+    const conns = graphData.links
+        .filter(l => l.source === d.id || l.target === d.id)
+        .slice(0, 15)
+        .map(l => `- ${l.source} -> ${l.target} [${l.linkType || 'uses'}]`)
+        .join('\n');
+    return [
+        'Analiza este elemento concreto de un código fuente:',
+        `- Nombre: ${d.id}`,
+        `- Tipo: ${TYPE_LABELS[d.type] || d.type}`,
+        d.line !== undefined ? `- Línea: ${d.line + 1}` : null,
+        '- Código del elemento:',
+        '```',
+        d.context || '(sin contexto disponible)',
+        '```',
+        '- Sus conexiones (relaciones con otros elementos):',
+        conns || '(ninguna)',
+        '',
+        'CÓDIGO COMPLETO (contexto):',
+        '```',
+        code.slice(0, 6000),
+        '```',
+        '',
+        'Explica en español: qué es este elemento, qué hace exactamente, cómo funciona, qué papel juega dentro del conjunto y por qué importan sus conexiones. Estructura con títulos y listas cortas.'
+    ].filter(Boolean).join('\n');
+}
+
+function buildLinkPrompt(info) {
+    const code = editor ? editor.getValue() : '';
+    const { sourceNode, targetNode, link } = info;
+    return [
+        'Analiza esta relación concreta entre dos elementos de un código:',
+        `- Origen: ${sourceNode ? sourceNode.id + ' (' + (TYPE_LABELS[sourceNode.type] || sourceNode.type) + ')' : '?'}`,
+        `- Destino: ${targetNode ? targetNode.id + ' (' + (TYPE_LABELS[targetNode.type] || targetNode.type) + ')' : '?'}`,
+        `- Tipo de relación: ${link?.linkType || 'uses'}`,
+        '',
+        'Código del origen:',
+        '```',
+        sourceNode?.context || '(sin contexto)',
+        '```',
+        'Código del destino:',
+        '```',
+        targetNode?.context || '(sin contexto)',
+        '```',
+        '',
+        'CÓDIGO COMPLETO (contexto):',
+        '```',
+        code.slice(0, 6000),
+        '```',
+        '',
+        'Explica en español qué significa esta relación: por qué el origen usa/llama al destino, qué implica para el funcionamiento y si hay algo relevante que notar. Estructura con títulos y listas cortas.'
+    ].join('\n');
+}
+
 function setupAiExplain() {
     const btn = document.getElementById('aiExplain');
     const overlay = document.getElementById('aiOverlay');
-    const content = document.getElementById('ai-content');
     const closeBtn = document.getElementById('closeAi');
     const copyBtn = document.getElementById('aiCopy');
     const keyBtn = document.getElementById('aiKeyBtn');
-    let lastText = '';
-
-    const show = html => { content.innerHTML = html; lastText = content.innerText; overlay.classList.remove('hidden'); };
-    const hide = () => overlay.classList.add('hidden');
-
-    async function explainWithAi(key, code) {
-        const summary = buildGraphSummary();
-        const prompt = [
-            'Explica QUÉ hace y CÓMO funciona este código.',
-            '',
-            'CÓDIGO:',
-            '```',
-            code.slice(0, 8000),
-            '```',
-            '',
-            'RESUMEN ESTRUCTURAL EXTRAÍDO AUTOMÁTICAMENTE:',
-            summary,
-            '',
-            'Estructura la respuesta en:',
-            '1) Propósito general (1-2 frases)',
-            '2) Piezas principales y su papel lógico',
-            '3) Lógica y flujo de ejecución paso a paso',
-            '4) Conexiones clave entre piezas',
-            '5) Posibles mejoras o riesgos',
-            'Sé concreto y menciona los nombres reales de variables, funciones y clases.'
-        ].join('\n');
-
-        show('<div class="ai-loading"><span class="ai-spinner"></span> La IA está analizando el código...</div>');
-        try {
-            const text = await callGemini(key, prompt);
-            show('<div class="ai-result">' + mdToHtml(text) + '</div>');
-        } catch (err) {
-            show('<div class="ai-error">⚠️ No pude conectar con Gemini: ' + err.message +
-                '<br><br><button id="aiRetry" class="btn-mini">Reintentar</button> ' +
-                '<button id="aiLocal2" class="btn-mini">Explicación local</button></div>');
-            document.getElementById('aiRetry').addEventListener('click', () => explainWithAi(key, code));
-            document.getElementById('aiLocal2').addEventListener('click', () => show(buildLocalExplanation()));
-        }
-    }
 
     btn.addEventListener('click', () => {
-        if (!overlay.classList.contains('hidden')) { hide(); return; }
-
+        if (!overlay.classList.contains('hidden')) { overlay.classList.add('hidden'); return; }
         const code = editor ? editor.getValue() : '';
         if (!code.trim()) {
-            show('<div class="ai-result"><p class="ai-msg">Escribe o pega un código en el editor y pulsa <b>Analizar</b> antes de pedir la explicación.</p></div>');
+            showAiPanel('<div class="ai-result"><p class="ai-msg">Escribe o pega un código en el editor y pulsa <b>Analizar</b> antes de pedir la explicación.</p></div>');
             return;
         }
-
-        const key = localStorage.getItem('geminiKey') || '';
-        if (!key) {
-            show(
-                '<div class="ai-result">' +
-                '<h3>Explicar el código con IA (Gemini, gratis)</h3>' +
-                '<p class="ai-msg">Para que la IA explique el código necesitas una clave de API gratuita:</p>' +
-                '<ol class="ai-steps">' +
-                '<li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></li>' +
-                '<li>Pulsa <b>Create API key</b> y copia la clave.</li>' +
-                '<li>Pégala aquí abajo (se guarda solo en tu navegador, nunca sale de él).</li>' +
-                '</ol>' +
-                '<div class="ai-keyrow">' +
-                '<input id="aiKeyInput" type="password" placeholder="Pega aquí tu clave de Gemini..." />' +
-                '<button id="aiKeySave" class="btn-mini">Guardar y explicar</button>' +
-                '</div>' +
-                '<p class="ai-msg">¿Prefieres verla sin IA?</p>' +
-                '<button id="aiLocal" class="btn-mini">Explicación lógica local</button>' +
-                '</div>'
-            );
-            document.getElementById('aiKeySave').addEventListener('click', () => {
-                const k = document.getElementById('aiKeyInput').value.trim();
-                if (k) { localStorage.setItem('geminiKey', k); explainWithAi(k, code); }
-            });
-            document.getElementById('aiLocal').addEventListener('click', () => show(buildLocalExplanation()));
-            return;
-        }
-        explainWithAi(key, code);
+        aiExplain(buildWholePrompt(code));
     });
 
-    closeBtn.addEventListener('click', hide);
+    closeBtn.addEventListener('click', () => overlay.classList.add('hidden'));
 
     copyBtn.addEventListener('click', () => {
-        if (!lastText) return;
-        navigator.clipboard?.writeText(lastText).catch(() => {});
+        if (!aiLastText) return;
+        navigator.clipboard?.writeText(aiLastText).catch(() => {});
         copyBtn.textContent = '✓ Copiado';
         setTimeout(() => { copyBtn.textContent = 'Copiar'; }, 1400);
     });
@@ -2288,6 +2364,15 @@ function setupAiExplain() {
         if (k === null) return;
         if (k.trim()) localStorage.setItem('geminiKey', k.trim());
         else localStorage.removeItem('geminiKey');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target && e.target.id === 'explainLinkBtn') {
+            e.stopPropagation();
+            hideLinkTooltip();
+            const info = window._linkExplain;
+            if (info) aiExplain(buildLinkPrompt(info));
+        }
     });
 }
 

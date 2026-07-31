@@ -761,3 +761,31 @@ path[data-source][stroke-dasharray="4,4"] {
     content: '💡';
     font-size: 0.8rem;
 }
+
+.lt-explain {
+    pointer-events: auto;
+    width: 100%;
+    margin-top: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(139, 92, 246, 0.18);
+    border: 1px solid rgba(139, 92, 246, 0.45);
+    color: #c4b5fd;
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+}
+
+.lt-explain:hover {
+    background: rgba(139, 92, 246, 0.38);
+    transform: translateY(-1px);
+}
+
+.ai-btn-mini {
+    margin-top: 10px;
+    width: 100%;
+    text-align: center;
+    padding: 6px 10px;
+    font-size: 0.76rem;
+}
