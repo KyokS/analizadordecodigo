@@ -1358,11 +1358,51 @@ function updateGraph(rawData) {
             .attr('class', !backward && finalDash !== 'none' ? 'link-anim' : null)
             .attr('data-default-opacity', finalOpacity)
             .attr('data-default-width', strokeW)
+            .attr('data-source', link.source)
+            .attr('data-target', link.target);
+
+        linkPath.node()._pathInfo = { lane: link._lane || 0, fanS, fanT };
+
+        let labelBg = null, labelText = null;
+        if (linkInfo) {
+            const mx2 = (sx + tx) / 2;
+            const my2 = (sy + ty) / 2;
+            const lblOffset = (t.y > s.y) ? 14 : -14;
+
+            labelBg = linkGroup.append('rect')
+                .attr('x', mx2 - 4)
+                .attr('y', my2 + lblOffset - 10)
+                .attr('width', linkInfo.label.length * 5.8 + 16)
+                .attr('height', 18)
+                .attr('rx', 9)
+                .attr('fill', 'rgba(13, 13, 26, 0.9)')
+                .attr('stroke', finalColor + '40')
+                .attr('stroke-width', 1)
+                .attr('opacity', 0)
+                .style('pointer-events', 'none');
+
+            labelText = linkGroup.append('text')
+                .attr('x', mx2 + 3).attr('y', my2 + lblOffset)
+                .attr('text-anchor', 'start')
+                .attr('dominant-baseline', 'middle')
+                .attr('fill', finalColor).attr('font-size', '9.5px').attr('font-weight', '600').attr('opacity', 0)
+                .text(linkInfo.label)
+                .style('pointer-events', 'none');
+        }
+
+        const hitPath = linkGroup.append('path')
+            .attr('d', pathD)
+            .attr('fill', 'none')
+            .attr('stroke', 'transparent')
+            .attr('stroke-width', 18)
+            .attr('stroke-linecap', 'round')
+            .attr('class', 'link-hit')
+            .style('pointer-events', 'stroke')
             .style('cursor', 'pointer')
             .attr('data-source', link.source)
             .attr('data-target', link.target)
             .on('mouseover', function (event) {
-                d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
+                d3.select(linkPath.node()).attr('stroke-opacity', 1).attr('stroke-width', 5);
                 clearAllHighlights();
                 showLinkTooltip(event, linkInfo, sourceNode, targetNode, link);
                 if (sourceNode) {
@@ -1376,47 +1416,17 @@ function updateGraph(rawData) {
                 nodeGroup.selectAll('g').attr('opacity', function (n) {
                     return n.id === link.source || n.id === link.target ? 1 : 0.15;
                 });
+                if (labelBg) labelBg.attr('opacity', 1);
+                if (labelText) labelText.attr('opacity', 0.95);
             })
             .on('mouseout', function () {
-                d3.select(this).attr('stroke-opacity', finalOpacity).attr('stroke-width', strokeW);
+                d3.select(linkPath.node()).attr('stroke-opacity', finalOpacity).attr('stroke-width', strokeW);
                 scheduleHideLinkTooltip();
                 clearAllHighlights();
                 nodeGroup.selectAll('g').attr('opacity', 1);
+                if (labelBg) labelBg.attr('opacity', 0);
+                if (labelText) labelText.attr('opacity', 0);
             });
-
-        linkPath.node()._pathInfo = { lane: link._lane || 0, fanS, fanT };
-
-        if (linkInfo) {
-            const mx2 = (sx + tx) / 2;
-            const my2 = (sy + ty) / 2;
-            const lblOffset = (t.y > s.y) ? 14 : -14;
-
-            const labelBg = linkGroup.append('rect')
-                .attr('x', mx2 - 4)
-                .attr('y', my2 + lblOffset - 10)
-                .attr('width', linkInfo.label.length * 5.8 + 16)
-                .attr('height', 18)
-                .attr('rx', 9)
-                .attr('fill', 'rgba(13, 13, 26, 0.9)')
-                .attr('stroke', finalColor + '40')
-                .attr('stroke-width', 1)
-                .attr('opacity', 0)
-                .style('pointer-events', 'none');
-
-            linkPath.on('mouseover.label', function () { labelBg.attr('opacity', 1); });
-            linkPath.on('mouseout.label', function () { labelBg.attr('opacity', 0); });
-
-            const labelText = linkGroup.append('text')
-                .attr('x', mx2 + 3).attr('y', my2 + lblOffset)
-                .attr('text-anchor', 'start')
-                .attr('dominant-baseline', 'middle')
-                .attr('fill', finalColor).attr('font-size', '9.5px').attr('font-weight', '600').attr('opacity', 0)
-                .text(linkInfo.label)
-                .style('pointer-events', 'none');
-
-            linkPath.on('mouseover.labeltext', function () { labelText.attr('opacity', 0.95); });
-            linkPath.on('mouseout.labeltext', function () { labelText.attr('opacity', 0); });
-        }
     }
 
     const iconMap = { variable: 'V', function: 'F', class: 'C', parameter: 'P', property: '\u00b7', method: 'M', constant: 'K', imported: 'I', template: 'T', default: '?' };
@@ -1773,6 +1783,7 @@ function highlightNode(d) {
 
     linkGroup.selectAll('path').each(function () {
         const el = d3.select(this);
+        if (el.attr('class') === 'link-hit') return;
         const src = el.attr('data-source');
         const tgt = el.attr('data-target');
         const isConn = src === d.id || tgt === d.id;
@@ -1793,6 +1804,7 @@ function resetHighlight() {
     nodeGroup.selectAll('g').attr('opacity', 1);
     linkGroup.selectAll('path').each(function () {
         const el = d3.select(this);
+        if (el.attr('class') === 'link-hit') return;
         el.attr('stroke-opacity', el.attr('data-default-opacity') || 0.4)
           .attr('stroke-width', el.attr('data-default-width') || 2);
     });
