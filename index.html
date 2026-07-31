@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Visualizer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/ruby/ruby.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/go/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/rust/rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/swift/swift.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/kotlin/kotlin.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/r/r.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/perl/perl.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/haskell/haskell.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/dart/dart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/vue/vue.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/php/php.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/jsx/jsx.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlembedded/htmlembedded.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+</head>
+<body>
+    <div id="graph-container">
+        <svg id="graph"></svg>
+    </div>
+
+    <div class="top-bar">
+        <div class="brand">
+            <h1>Code Visualizer</h1>
+        </div>
+        <div class="toolbar">
+            <select id="language">
+                <optgroup label="Web">
+                    <option value="application/x-httpd-php">PHP</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="text/typescript">TypeScript</option>
+                    <option value="jsx">JSX / React</option>
+                    <option value="vue">Vue.js</option>
+                    <option value="text/htmlmixed">HTML</option>
+                    <option value="text/css">CSS</option>
+                    <option value="text/x-sql">SQL</option>
+                </optgroup>
+                <optgroup label="Backend">
+                    <option value="python">Python</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="text/x-java">Java</option>
+                    <option value="text/x-csharp">C#</option>
+                    <option value="text/x-csrc">C</option>
+                    <option value="text/x-c++src">C++</option>
+                    <option value="swift">Swift</option>
+                    <option value="kotlin">Kotlin</option>
+                </optgroup>
+                <optgroup label="Otros">
+                    <option value="r">R</option>
+                    <option value="perl">Perl</option>
+                    <option value="lua">Lua</option>
+                    <option value="haskell">Haskell</option>
+                    <option value="dart">Dart</option>
+                    <option value="shell">Bash / Shell</option>
+                </optgroup>
+                <optgroup label="Templates">
+                    <option value="htmlembedded">Blade / ERB / ASP</option>
+                    <option value="text/x-htmlembedded">Django / Twig</option>
+                </optgroup>
+            </select>
+            <button id="analyzeBtn" class="btn-analyze">Analizar</button>
+            <button id="toggleEditor" class="btn-icon" title="Abrir editor">Editor</button>
+            <button id="resetZoom" class="btn-icon" title="Reset zoom">Zoom</button>
+        </div>
+    </div>
+
+    <div class="editor-overlay" id="editorOverlay">
+        <div class="editor-header">
+            <span>Editor de Código</span>
+            <button id="closeEditor" class="btn-close">&times;</button>
+        </div>
+        <div id="editor"></div>
+    </div>
+
+    <div class="legend-bar" id="legend"></div>
+
+    <div class="info-overlay" id="infoOverlay">
+        <div class="info-header">
+            <span>Detalles del Elemento</span>
+            <button id="closeInfo" class="btn-close">&times;</button>
+        </div>
+        <div id="element-info">
+            <p class="hint">Haz clic en un nodo para ver detalles</p>
+        </div>
+    </div>
+
+    <div class="stats-overlay" id="statsOverlay">
+        <div class="stats-header">
+            <span>Estadísticas</span>
+            <button id="closeStats" class="btn-close">&times;</button>
+        </div>
+        <div id="stats-content">
+            <p class="hint">Analiza código para ver estadísticas</p>
+        </div>
+    </div>
+
+    <div class="unrecognized-overlay" id="unrecognizedOverlay">
+        <div class="unrecognized-header">
+            <span>No reconocidos</span>
+            <button id="closeUnrecognized" class="btn-close">&times;</button>
+        </div>
+        <div id="unrecognized-content">
+            <p class="hint">Bloques sin analizar</p>
+        </div>
+    </div>
+
+    <div class="bottom-buttons">
+        <button id="toggleStats" class="btn-panel">Estadísticas</button>
+        <button id="toggleUnrecognized" class="btn-panel">No reconocidos</button>
+        <button id="toggleInfo" class="btn-panel">Detalles</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
