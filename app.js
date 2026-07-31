@@ -758,7 +758,7 @@ function analyzeCode(code, language) {
         }
     }
 
-    const MAX_LINKS_PER_NODE = 6;
+    const MAX_LINKS_PER_NODE = 5;
     const filtered = Array.from(pairBest.values()).sort(
         (a, b) => (LINK_PRIORITY[a.linkType] || 9) - (LINK_PRIORITY[b.linkType] || 9)
     );
@@ -849,8 +849,23 @@ function initGraph() {
     });
 }
 
-function buildChains(data) {
-    const adj = new Map();
+function renderZoneFilters() {
+    const el = document.getElementById('zoneFilters');
+    if (!el) return;
+    el.innerHTML = COLUMN_LABELS.map((label, c) =>
+        `<button class="zone-chip ${activeZones.has(c) ? 'active' : 'off'}" data-zone="${c}" style="--zc:${COLUMN_COLORS[c]}" title="Mostrar/ocultar ${label}"><span class="dot"></span>${label}</button>`
+    ).join('');
+    el.querySelectorAll('.zone-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const c = Number(btn.dataset.zone);
+            if (activeZones.has(c)) activeZones.delete(c); else activeZones.add(c);
+            renderZoneFilters();
+            if (fullData) updateGraph(fullData);
+        });
+    });
+}
+
+function buildChains(data) {    const adj = new Map();
     data.nodes.forEach(n => adj.set(n.id, new Set()));
     data.links.forEach(l => {
         if (adj.has(l.source)) adj.get(l.source).add(l.target);
@@ -900,25 +915,70 @@ function buildChains(data) {
     return chains;
 }
 
+const COLUMN_TYPES = [
+    ['imported', 'template'],
+    ['constant', 'variable', 'property'],
+    ['class', 'function'],
+    ['parameter', 'method'],
+];
+const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
+const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
+const MAX_ZONE_NODES = 8;
+let activeZones = new Set([0, 1, 2, 3]);
+let expandedZones = new Set();
+let fullData = null;
+
+function nodeZone(node) {
+    if (node.zone !== undefined) return node.zone;
+    for (let c = 0; c < COLUMN_TYPES.length; c++) {
+        if (COLUMN_TYPES[c].includes(node.type)) return c;
+    }
+    return COLUMN_TYPES.length - 1;
+}
+
+function filterGraphData(raw) {
+    let nodes = raw.nodes.filter(n => n.id.startsWith('__extra') || activeZones.has(nodeZone(n)));
+    const extraNodes = [];
+    for (let c = 0; c < COLUMN_TYPES.length; c++) {
+        if (!activeZones.has(c) || expandedZones.has(c)) continue;
+        const zoneNodes = nodes.filter(n => nodeZone(n) === c).sort((a, b) => (a.line || 0) - (b.line || 0));
+        if (zoneNodes.length > MAX_ZONE_NODES) {
+            const hiddenIds = new Set(zoneNodes.slice(MAX_ZONE_NODES).map(n => n.id));
+            nodes = nodes.filter(n => !hiddenIds.has(n.id));
+            extraNodes.push({
+                id: `__extra_${c}__`,
+                type: 'default',
+                zone: c,
+                line: zoneNodes[zoneNodes.length - 1].line + 1,
+                connections: [],
+                color: COLUMN_COLORS[c],
+                extraCount: hiddenIds.size,
+            });
+        }
+    }
+    const all = nodes.concat(extraNodes);
+    const allIds = new Set(all.map(n => n.id));
+    const links = raw.links.filter(l => allIds.has(l.source) && allIds.has(l.target));
+    return { nodes: all, links };
+}
+
 function computeLayout(data) {
     const container = document.getElementById('graph-container');
     const W = container.clientWidth;
     const H = container.clientHeight;
 
-    const NODE_W = 220, NODE_H = 64;
-    const H_GAP = 130, V_GAP = 32, MARGIN = 60;
-
-    const COLUMN_TYPES = [
-        ['imported', 'template'],
-        ['constant', 'variable', 'property'],
-        ['class', 'function'],
-        ['parameter', 'method'],
-    ];
+    const NODE_W = 240, NODE_H = 72;
+    const H_GAP = 140, V_GAP = 36, MARGIN = 60;
 
     const columns = COLUMN_TYPES.map(() => []);
     const assigned = new Set();
 
     for (const node of data.nodes) {
+        if (node.zone !== undefined) {
+            columns[node.zone].push(node);
+            assigned.add(node.id);
+            continue;
+        }
         for (let c = 0; c < COLUMN_TYPES.length; c++) {
             if (COLUMN_TYPES[c].includes(node.type)) {
                 columns[c].push(node);
@@ -1059,7 +1119,9 @@ function computeMainChain(data, pos) {
     return chain;
 }
 
-function updateGraph(data) {
+function updateGraph(rawData) {
+    fullData = rawData;
+    const data = filterGraphData(rawData);
     graphData = data;
     currentData = data;
     linkGroup.selectAll('*').remove();
@@ -1102,9 +1164,6 @@ function updateGraph(data) {
 
     document.getElementById('resetZoom').onclick = () => svg.transition().duration(500).call(zoom.transform, initialTransform);
     window._graphZoom = zoom;
-
-    const COLUMN_LABELS = ['Entradas', 'Datos', 'Lógica', 'Salidas'];
-    const COLUMN_COLORS = ['#a78bfa', '#60a5fa', '#34d399', '#f472b6'];
 
     const colGeom = {};
     for (let c = 0; c < 4; c++) {
@@ -1304,7 +1363,14 @@ function updateGraph(data) {
     const ng = nodeGroup.selectAll('g').data(data.nodes).enter().append('g')
         .attr('transform', d => { const p = pos[d.id]; return p ? `translate(${p.x},${p.y})` : 'translate(0,0)'; })
         .style('cursor', 'grab')
-        .on('click', (e, d) => showNodeInfo(d))
+        .on('click', (e, d) => {
+            if (d.extraCount !== undefined) {
+                expandedZones.add(d.zone);
+                updateGraph(fullData);
+                return;
+            }
+            showNodeInfo(d);
+        })
         .on('mouseover', function (e, d) {
             clearAllHighlights();
             highlightNode(d);
@@ -1349,16 +1415,18 @@ function updateGraph(data) {
     ng.each(function (d) {
         const g = d3.select(this);
         const p = pos[d.id];
-        const w = p ? p.w : 220;
-        const h = p ? p.h : 64;
+        const w = p ? p.w : 240;
+        const h = p ? p.h : 72;
         const c = d.color;
+        const isExtra = d.extraCount !== undefined;
 
         g.append('rect')
             .attr('width', w).attr('height', h)
             .attr('rx', 10).attr('ry', 10)
             .attr('fill', '#111827')
-            .attr('stroke', c + '60')
+            .attr('stroke', isExtra ? c + 'aa' : c + '60')
             .attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', isExtra ? '6,4' : 'none')
             .style('filter', 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))');
 
         g.append('rect')
@@ -1368,39 +1436,39 @@ function updateGraph(data) {
             .attr('fill', c);
 
         g.append('rect')
-            .attr('x', 14).attr('y', 10)
-            .attr('width', 22).attr('height', 22)
+            .attr('x', 14).attr('y', 12)
+            .attr('width', 24).attr('height', 24)
             .attr('rx', 6).attr('ry', 6)
             .attr('fill', c + '25')
             .attr('stroke', c + '40')
             .attr('stroke-width', 1);
 
         g.append('text')
-            .attr('x', 25).attr('y', 21)
+            .attr('x', 26).attr('y', 24)
             .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-            .attr('fill', c).attr('font-size', '11px').attr('font-weight', '800')
+            .attr('fill', c).attr('font-size', '12px').attr('font-weight', '800')
             .attr('font-family', "'Consolas',monospace")
-            .text(iconMap[d.type] || '?');
+            .text(isExtra ? '+' : (iconMap[d.type] || '?'));
 
         g.append('text')
-            .attr('x', 42).attr('y', 21)
+            .attr('x', 46).attr('y', 24)
             .attr('dominant-baseline', 'middle')
-            .attr('fill', '#ffffff').attr('font-size', '11.5px')
+            .attr('fill', '#ffffff').attr('font-size', '12.5px')
             .attr('font-family', "'Consolas','Fira Code',monospace").attr('font-weight', '700')
-            .text(d.id.length > 16 ? d.id.substring(0, 13) + '...' : d.id);
+            .text(isExtra ? '+' + d.extraCount + ' más' : (d.id.length > 17 ? d.id.substring(0, 14) + '...' : d.id));
 
         g.append('text')
-            .attr('x', 14).attr('y', 44)
+            .attr('x', 14).attr('y', 50)
             .attr('dominant-baseline', 'middle')
-            .attr('fill', c).attr('font-size', '9px').attr('font-weight', '600')
+            .attr('fill', c).attr('font-size', '9.5px').attr('font-weight', '600')
             .attr('opacity', 0.65)
-            .text(TYPE_LABELS[d.type] || d.type);
+            .text(isExtra ? 'Clic para mostrar' : (TYPE_LABELS[d.type] || d.type));
 
         g.append('text')
-            .attr('x', w - 16).attr('y', 44)
+            .attr('x', w - 16).attr('y', 50)
             .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-            .attr('fill', '#555').attr('font-size', '8.5px')
-            .text(d.line !== undefined ? 'L' + (d.line + 1) : '');
+            .attr('fill', '#555').attr('font-size', '9px')
+            .text(isExtra ? '' : (d.line !== undefined ? 'L' + (d.line + 1) : ''));
 
         g.append('circle')
             .attr('cx', 6).attr('cy', h / 2)
@@ -1411,7 +1479,7 @@ function updateGraph(data) {
             .attr('r', 4).attr('fill', c).attr('opacity', 0.35);
 
         g.append('circle')
-            .attr('cx', w - 16).attr('cy', 14)
+            .attr('cx', w - 16).attr('cy', 16)
             .attr('r', 5).attr('fill', c).attr('opacity', 0.5);
     });
 
@@ -1913,6 +1981,7 @@ function init() {
     });
 
     initGraph();
+    renderZoneFilters();
 
     document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
@@ -1939,6 +2008,6 @@ window.addEventListener('resize', () => {
     const c = document.getElementById('graph-container');
     svg.attr('width', c.clientWidth).attr('height', c.clientHeight);
     if (currentData && currentData.nodes.length) {
-        updateGraph(currentData);
+        updateGraph(fullData || currentData);
     }
 });
