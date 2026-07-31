@@ -82,6 +82,7 @@
                 </optgroup>
             </select>
             <button id="analyzeBtn" class="btn-analyze">Analizar</button>
+            <button id="aiExplain" class="btn-icon ai-btn" title="Explicar el código con IA (Gemini gratis)">Explicar IA</button>
             <button id="toggleEditor" class="btn-icon" title="Abrir editor">Editor</button>
             <button id="resetZoom" class="btn-icon" title="Reset zoom">Zoom</button>
         </div>
@@ -115,6 +116,18 @@
         <div id="unrecognized-content">
             <p class="hint">Bloques sin analizar</p>
         </div>
+    </div>
+
+    <div class="ai-overlay hidden" id="aiOverlay">
+        <div class="ai-header">
+            <span>Explicación del código</span>
+            <div class="ai-header-actions">
+                <button id="aiKeyBtn" class="btn-mini" title="Cambiar o borrar la clave de Gemini">Clave</button>
+                <button id="aiCopy" class="btn-mini" title="Copiar explicación">Copiar</button>
+                <button id="closeAi" class="btn-close">&times;</button>
+            </div>
+        </div>
+        <div id="ai-content"></div>
     </div>
 
     <div class="bottom-buttons">

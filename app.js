@@ -2038,6 +2038,259 @@ function updateUnrecognized(code, language) {
     `;
 }
 
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+
+function buildGraphSummary() {
+    const data = graphData;
+    if (!data || !data.nodes.length) return 'Sin datos analizados.';
+    const zoneNodes = [[], [], [], []];
+    data.nodes.forEach(n => {
+        const z = nodeZone(n);
+        if (zoneNodes[z]) zoneNodes[z].push(n);
+    });
+    const lines = [];
+    zoneNodes.forEach((nodes, c) => {
+        if (!nodes.length) return;
+        const names = nodes.slice(0, 12)
+            .map(n => n.id + (n.type ? ' (' + (TYPE_LABELS[n.type] || n.type) + ')' : ''))
+            .join(', ');
+        lines.push(`- Zona ${COLUMN_LABELS[c]}: ${names}`);
+    });
+    lines.push('');
+    lines.push('Conexiones (origen -> destino [tipo]):');
+    data.links.slice(0, 80).forEach(l => lines.push(`- ${l.source} -> ${l.target} [${l.linkType || 'uses'}]`));
+    return lines.join('\n');
+}
+
+function buildLocalExplanation() {
+    const data = graphData;
+    if (!data || !data.nodes.length) {
+        return '<div class="ai-result"><p class="ai-msg">Aún no hay código analizado. Escribe o pega un código en el editor y pulsa <b>Analizar</b>.</p></div>';
+    }
+
+    const perZone = {};
+    data.nodes.forEach(n => {
+        const z = nodeZone(n);
+        (perZone[z] = perZone[z] || []).push(n);
+    });
+
+    const typeCount = {};
+    data.nodes.forEach(n => { typeCount[n.type] = (typeCount[n.type] || 0) + 1; });
+    const typeSummary = Object.entries(typeCount)
+        .map(([t, c]) => `${c} ${TYPE_LABELS[t] || t}${c > 1 ? 's' : ''}`)
+        .join(', ');
+
+    const deg = new Map();
+    const linkTypes = {};
+    data.links.forEach(l => {
+        deg.set(l.source, (deg.get(l.source) || 0) + 1);
+        deg.set(l.target, (deg.get(l.target) || 0) + 1);
+        const lt = l.linkType || 'uses';
+        linkTypes[lt] = (linkTypes[lt] || 0) + 1;
+    });
+    const hubs = [...deg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const linkSummary = Object.entries(linkTypes)
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, c]) => `${c} ${t}`)
+        .join(', ');
+
+    const zoneHtml = Object.keys(perZone).sort().map(c => {
+        const nodes = perZone[c].slice(0, 12);
+        const extra = perZone[c].length - nodes.length;
+        return `<li><b>${COLUMN_LABELS[c]}</b>: ${nodes.map(n => `<code>${n.id}</code>`).join(', ')}${extra > 0 ? ` y ${extra} más` : ''}</li>`;
+    }).join('');
+
+    let html = '<div class="ai-result">';
+    html += '<h3>Explicación lógica local (sin IA)</h3>';
+    html += `<p>El código analizado contiene <b>${data.nodes.length} elementos</b> conectados por <b>${data.links.length} relaciones</b> (${typeSummary}).</p>`;
+    html += `<h4>Qué hay en cada zona</h4><ul>${zoneHtml}</ul>`;
+    html += `<h4>Piezas centrales (más conexiones)</h4><ul>${hubs.map(([id, d]) => `<li><code>${id}</code> — ${d} conexiones</li>`).join('')}</ul>`;
+    html += `<h4>Tipos de relación</h4><p>${linkSummary}</p>`;
+    html += `<p class="ai-note">Esta explicación se genera desde la estructura del grafo. Para una explicación completa redactada por IA, añade una clave gratuita de Gemini.</p>`;
+    html += '</div>';
+    return html;
+}
+
+function mdToHtml(md) {
+    const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const inline = s => s
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    const lines = md.split(/\r?\n/);
+    let html = '', inUl = false, buf = [], inPre = false;
+
+    const flushUl = () => {
+        if (inUl) { html += '<ul>' + buf.map(l => '<li>' + l + '</li>').join('') + '</ul>'; buf = []; inUl = false; }
+    };
+
+    for (const raw of lines) {
+        if (raw.trim().startsWith('```')) {
+            flushUl();
+            html += inPre ? '</pre>' : '<pre>';
+            inPre = !inPre;
+            continue;
+        }
+        if (inPre) { html += esc(raw) + '\n'; continue; }
+
+        const t = raw.trim();
+        if (!t) { flushUl(); continue; }
+        if (/^#{1,4}\s/.test(t)) {
+            flushUl();
+            const lvl = t.match(/^#+/)[0].length + 1;
+            html += `<h${Math.min(lvl, 6)}>${inline(esc(t.replace(/^#+\s*/, '')))}</h${Math.min(lvl, 6)}>`;
+            continue;
+        }
+        if (/^[-•*]\s+/.test(t)) {
+            if (!inUl) { flushUl(); inUl = true; }
+            buf.push(inline(esc(t.replace(/^[-•*]\s+/, ''))));
+            continue;
+        }
+        flushUl();
+        html += `<p>${inline(esc(t))}</p>`;
+    }
+    flushUl();
+    if (inPre) html += '</pre>';
+    return html;
+}
+
+async function callGemini(key, prompt) {
+    const body = {
+        system_instruction: { parts: [{ text: 'Eres un analista senior de código. Explica con claridad, en español, usando los nombres reales de las entidades. Usa títulos, listas cortas y, si hace falta, un ejemplo breve. No inventes código que no esté presente.' }] },
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+    };
+    let lastErr = null;
+    for (const model of GEMINI_MODELS) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                lastErr = `${model}: ${res.status} ${errText.slice(0, 160)}`;
+                continue;
+            }
+            const json = await res.json();
+            const text = (json?.candidates?.[0]?.content?.parts || [])
+                .map(p => p.text || '').join('');
+            if (text) return text;
+            lastErr = `${model}: respuesta vacía`;
+        } catch (e) {
+            lastErr = `${model}: ${e.message}`;
+        }
+    }
+    throw new Error(lastErr || 'Error desconocido');
+}
+
+function setupAiExplain() {
+    const btn = document.getElementById('aiExplain');
+    const overlay = document.getElementById('aiOverlay');
+    const content = document.getElementById('ai-content');
+    const closeBtn = document.getElementById('closeAi');
+    const copyBtn = document.getElementById('aiCopy');
+    const keyBtn = document.getElementById('aiKeyBtn');
+    let lastText = '';
+
+    const show = html => { content.innerHTML = html; lastText = content.innerText; overlay.classList.remove('hidden'); };
+    const hide = () => overlay.classList.add('hidden');
+
+    async function explainWithAi(key, code) {
+        const summary = buildGraphSummary();
+        const prompt = [
+            'Explica QUÉ hace y CÓMO funciona este código.',
+            '',
+            'CÓDIGO:',
+            '```',
+            code.slice(0, 8000),
+            '```',
+            '',
+            'RESUMEN ESTRUCTURAL EXTRAÍDO AUTOMÁTICAMENTE:',
+            summary,
+            '',
+            'Estructura la respuesta en:',
+            '1) Propósito general (1-2 frases)',
+            '2) Piezas principales y su papel lógico',
+            '3) Lógica y flujo de ejecución paso a paso',
+            '4) Conexiones clave entre piezas',
+            '5) Posibles mejoras o riesgos',
+            'Sé concreto y menciona los nombres reales de variables, funciones y clases.'
+        ].join('\n');
+
+        show('<div class="ai-loading"><span class="ai-spinner"></span> La IA está analizando el código...</div>');
+        try {
+            const text = await callGemini(key, prompt);
+            show('<div class="ai-result">' + mdToHtml(text) + '</div>');
+        } catch (err) {
+            show('<div class="ai-error">⚠️ No pude conectar con Gemini: ' + err.message +
+                '<br><br><button id="aiRetry" class="btn-mini">Reintentar</button> ' +
+                '<button id="aiLocal2" class="btn-mini">Explicación local</button></div>');
+            document.getElementById('aiRetry').addEventListener('click', () => explainWithAi(key, code));
+            document.getElementById('aiLocal2').addEventListener('click', () => show(buildLocalExplanation()));
+        }
+    }
+
+    btn.addEventListener('click', () => {
+        if (!overlay.classList.contains('hidden')) { hide(); return; }
+
+        const code = editor ? editor.getValue() : '';
+        if (!code.trim()) {
+            show('<div class="ai-result"><p class="ai-msg">Escribe o pega un código en el editor y pulsa <b>Analizar</b> antes de pedir la explicación.</p></div>');
+            return;
+        }
+
+        const key = localStorage.getItem('geminiKey') || '';
+        if (!key) {
+            show(
+                '<div class="ai-result">' +
+                '<h3>Explicar el código con IA (Gemini, gratis)</h3>' +
+                '<p class="ai-msg">Para que la IA explique el código necesitas una clave de API gratuita:</p>' +
+                '<ol class="ai-steps">' +
+                '<li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></li>' +
+                '<li>Pulsa <b>Create API key</b> y copia la clave.</li>' +
+                '<li>Pégala aquí abajo (se guarda solo en tu navegador, nunca sale de él).</li>' +
+                '</ol>' +
+                '<div class="ai-keyrow">' +
+                '<input id="aiKeyInput" type="password" placeholder="Pega aquí tu clave de Gemini..." />' +
+                '<button id="aiKeySave" class="btn-mini">Guardar y explicar</button>' +
+                '</div>' +
+                '<p class="ai-msg">¿Prefieres verla sin IA?</p>' +
+                '<button id="aiLocal" class="btn-mini">Explicación lógica local</button>' +
+                '</div>'
+            );
+            document.getElementById('aiKeySave').addEventListener('click', () => {
+                const k = document.getElementById('aiKeyInput').value.trim();
+                if (k) { localStorage.setItem('geminiKey', k); explainWithAi(k, code); }
+            });
+            document.getElementById('aiLocal').addEventListener('click', () => show(buildLocalExplanation()));
+            return;
+        }
+        explainWithAi(key, code);
+    });
+
+    closeBtn.addEventListener('click', hide);
+
+    copyBtn.addEventListener('click', () => {
+        if (!lastText) return;
+        navigator.clipboard?.writeText(lastText).catch(() => {});
+        copyBtn.textContent = '✓ Copiado';
+        setTimeout(() => { copyBtn.textContent = 'Copiar'; }, 1400);
+    });
+
+    keyBtn.addEventListener('click', () => {
+        const current = localStorage.getItem('geminiKey') || '';
+        const k = prompt(
+            current ? 'Tu clave actual está guardada. Escribe una nueva (o vacío para borrarla):' : 'Pega tu clave de Gemini (gratis en aistudio.google.com/apikey):',
+            current
+        );
+        if (k === null) return;
+        if (k.trim()) localStorage.setItem('geminiKey', k.trim());
+        else localStorage.removeItem('geminiKey');
+    });
+}
+
 function analyze() {
     const code = editor.getValue();
     const lang = document.getElementById('language').value;
@@ -2139,6 +2392,8 @@ function init() {
     let debounceTimer;
     editor.on('change', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(analyze, 600); });
     setTimeout(analyze, 300);
+
+    setupAiExplain();
 }
 
 document.addEventListener('DOMContentLoaded', init);
