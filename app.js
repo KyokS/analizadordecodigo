@@ -1106,8 +1106,14 @@ function updateGraph(data) {
                 d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5.5);
                 clearAllHighlights();
                 showLinkTooltip(event, linkInfo, sourceNode, targetNode);
-                if (sourceNode && sourceNode.line !== undefined) highlightCodeLine(sourceNode.line);
-                if (targetNode && targetNode.line !== undefined) highlightCodeLine(targetNode.line);
+                if (sourceNode) {
+                    if (sourceNode.line !== undefined) highlightCodeLine(sourceNode.line);
+                    highlightIdentifier(sourceNode.id, sourceNode.color);
+                }
+                if (targetNode) {
+                    if (targetNode.line !== undefined) highlightCodeLine(targetNode.line);
+                    highlightIdentifier(targetNode.id, targetNode.color);
+                }
                 nodeGroup.selectAll('g').attr('opacity', function (n) {
                     return n.id === link.source || n.id === link.target ? 1 : 0.15;
                 });
@@ -1169,7 +1175,10 @@ function updateGraph(data) {
                     d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
                     const otherId = src === d.id ? tgt : src;
                     const otherNode = data.nodes.find(n => n.id === otherId);
-                    if (otherNode && otherNode.line !== undefined) highlightCodeLine(otherNode.line);
+                    if (otherNode) {
+                        if (otherNode.line !== undefined) highlightCodeLine(otherNode.line);
+                        highlightIdentifier(otherNode.id, otherNode.color);
+                    }
                 }
             });
         })
@@ -1397,10 +1406,12 @@ function ensureEditorVisible() {
     const overlay = document.getElementById('editorOverlay');
     if (overlay.classList.contains('hidden')) {
         overlay.classList.remove('hidden');
+        setTimeout(() => { if (editor) editor.refresh(); }, 320);
     }
 }
 
 let _highlightedLines = [];
+let _editorMarks = [];
 
 function highlightCodeLine(lineNum) {
     if (!editor || lineNum === undefined || lineNum === null) return;
@@ -1410,18 +1421,45 @@ function highlightCodeLine(lineNum) {
     editor.scrollIntoView({ line: lineNum, ch: 0 }, 80);
 }
 
+function highlightIdentifier(name, color) {
+    if (!editor || !name) return;
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const lineRe = new RegExp('\\b' + esc + '\\b', 'g');
+    const lines = editor.getValue().split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        let m;
+        while ((m = lineRe.exec(lines[i])) !== null) {
+            const mark = editor.markText(
+                { line: i, ch: m.index },
+                { line: i, ch: m.index + m[0].length },
+                {
+                    className: 'code-id-mark',
+                    attributes: { style: 'background:' + color + '30;border-bottom:2px solid ' + color + ';border-radius:3px;font-weight:700;color:' + color }
+                }
+            );
+            _editorMarks.push(mark);
+        }
+    }
+}
+
 function clearAllHighlights() {
     if (!editor) return;
     for (const line of _highlightedLines) {
         editor.removeLineClass(line, 'background', 'highlight-line');
     }
     _highlightedLines = [];
+    for (const mark of _editorMarks) {
+        try { mark.clear(); } catch (e) {}
+    }
+    _editorMarks = [];
 }
 
 function highlightNodeCode(d) {
+    if (!d) return;
     if (d.line !== undefined) {
         highlightCodeLine(d.line);
     }
+    highlightIdentifier(d.id, d.color);
 }
 
 function showNodeInfo(d) {

@@ -161,6 +161,12 @@ body {
     pointer-events: none;
 }
 
+.code-id-mark {
+    border-radius: 3px;
+    font-weight: 700;
+    background: rgba(0, 217, 255, 0.15);
+}
+
 @keyframes linePulse {
     0% { background: rgba(0, 217, 255, 0.45); border-left-width: 6px; }
     50% { background: rgba(0, 217, 255, 0.25); }
@@ -225,12 +231,12 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-/* Info overlay */
+/* Info overlay - right side, does not block the editor (left) */
 .info-overlay {
     position: fixed;
-    bottom: 12px; left: 12px;
+    top: 60px; right: 240px;
     width: 340px;
-    max-height: 320px;
+    max-height: calc(100vh - 80px);
     background: rgba(22, 33, 62, 0.92);
     backdrop-filter: blur(14px);
     border: 1px solid rgba(0, 217, 255, 0.2);
@@ -243,7 +249,7 @@ body {
 }
 
 .info-overlay.hidden {
-    transform: translateY(340px);
+    transform: translateY(-20px);
     opacity: 0;
     pointer-events: none;
 }
