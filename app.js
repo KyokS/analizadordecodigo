@@ -876,46 +876,61 @@ function buildChains(data) {
 function computeLayout(data) {
     const container = document.getElementById('graph-container');
     const W = container.clientWidth;
+    const H = container.clientHeight;
 
-    const NODE_W = 180, NODE_H = 50, V_GAP = 55, CHAIN_GAP = 70, MARGIN = 30;
+    const NODE_W = 220, NODE_H = 64;
+    const H_GAP = 100, V_GAP = 30, MARGIN = 60;
 
-    const chains = buildChains(data);
-    chainColors = {};
-    chainColorIdx = 0;
+    const COLUMN_TYPES = [
+        ['imported', 'template'],
+        ['constant', 'variable', 'property'],
+        ['class', 'function'],
+        ['parameter', 'method'],
+    ];
+
+    const columns = COLUMN_TYPES.map(() => []);
+    const assigned = new Set();
+
+    for (const node of data.nodes) {
+        for (let c = 0; c < COLUMN_TYPES.length; c++) {
+            if (COLUMN_TYPES[c].includes(node.type)) {
+                columns[c].push(node);
+                assigned.add(node.id);
+                break;
+            }
+        }
+    }
+
+    const unassigned = data.nodes.filter(n => !assigned.has(n.id));
+    if (unassigned.length) columns[columns.length - 1].push(...unassigned);
+
+    const totalCols = columns.length;
+    const totalWidth = totalCols * NODE_W + (totalCols - 1) * H_GAP;
+    const startX = (W - totalWidth) / 2;
 
     const pos = {};
-    let totalY = MARGIN;
 
-    for (const chain of chains) {
-        const chainColor = CHAIN_PALETTE[chainColorIdx % CHAIN_PALETTE.length];
-        chain.forEach(id => { chainColors[id] = chainColor; });
-        chainColorIdx++;
+    for (let c = 0; c < totalCols; c++) {
+        const col = columns[c];
+        if (!col.length) continue;
 
-        const centerX = W / 2;
+        const colX = startX + c * (NODE_W + H_GAP);
+        const totalH = col.length * NODE_H + (col.length - 1) * V_GAP;
+        const startY = (H - totalH) / 2;
 
-        for (let i = 0; i < chain.length; i++) {
-            const id = chain[i];
-            const node = data.nodes.find(n => n.id === id);
-            if (!node) continue;
-
-            const x = centerX - NODE_W / 2;
-            const y = totalY + i * (NODE_H + V_GAP);
-
-            pos[id] = {
-                x: x,
-                y: y,
+        for (let r = 0; r < col.length; r++) {
+            const node = col[r];
+            pos[node.id] = {
+                x: colX,
+                y: startY + r * (NODE_H + V_GAP),
                 w: NODE_W,
                 h: NODE_H,
-                chainIdx: chainColorIdx - 1,
-                chainColor: chainColor,
-                row: i,
-                col: 0,
+                col: c,
+                row: r,
                 color: node.color,
                 data: node
             };
         }
-
-        totalY += chain.length * (NODE_H + V_GAP) + CHAIN_GAP;
     }
 
     return pos;
@@ -952,6 +967,34 @@ function getLinkInfo(source, target, linkType) {
     };
 }
 
+function updateLinksForNode(nodeId, pos, data) {
+    linkGroup.selectAll('path').each(function () {
+        const src = d3.select(this).attr('data-source');
+        const tgt = d3.select(this).attr('data-target');
+        if (src !== nodeId && tgt !== nodeId) return;
+
+        const s = pos[src], t = pos[tgt];
+        if (!s || !t) return;
+
+        const sx = src === nodeId ? (d3.select(this).attr('d').match(/M([\d.]+)/) || [])[1] || s.x + s.w : s.x + s.w;
+        const sy = s.y + s.h / 2;
+        const tx = tgt === nodeId ? t.x : t.x;
+        const ty = t.y + t.h / 2;
+
+        const sourceNode = data.nodes.find(n => n.id === src);
+        const targetNode = data.nodes.find(n => n.id === tgt);
+        const linkData = data.links.find(l => l.source === src && l.target === tgt);
+        const linkInfo = getLinkInfo(sourceNode, targetNode, linkData ? linkData.linkType : 'uses');
+        const linkColor = linkInfo ? linkInfo.color : '#666';
+
+        const dx = tx - sx;
+        const cp1x = sx + dx * 0.4;
+        const cp2x = tx - dx * 0.4;
+
+        d3.select(this).attr('d', `M${sx},${sy} C${cp1x},${sy} ${cp2x},${ty} ${tx},${ty}`);
+    });
+}
+
 function updateGraph(data) {
     graphData = data;
     currentData = data;
@@ -961,7 +1004,7 @@ function updateGraph(data) {
     if (data.nodes.length === 0) {
         nodeGroup.append('text').attr('x', svg.attr('width') / 2).attr('y', svg.attr('height') / 2)
             .attr('text-anchor', 'middle').attr('fill', '#555').attr('font-size', '16px')
-            .text('Escribe código y pulsa Analizar');
+            .text('Escribe codigo y pulsa Analizar');
         updateLegend();
         return;
     }
@@ -983,7 +1026,7 @@ function updateGraph(data) {
 
     svg.attr('width', containerW).attr('height', containerH);
 
-    const zoom = d3.zoom().scaleExtent([0.2, 3]).on('zoom', (e) => mainGroup.attr('transform', e.transform));
+    const zoom = d3.zoom().scaleExtent([0.15, 3]).on('zoom', (e) => mainGroup.attr('transform', e.transform));
     svg.call(zoom);
 
     const initialTransform = d3.zoomIdentity
@@ -992,184 +1035,235 @@ function updateGraph(data) {
     svg.call(zoom.transform, initialTransform);
 
     document.getElementById('resetZoom').onclick = () => svg.transition().duration(500).call(zoom.transform, initialTransform);
+    window._graphZoom = zoom;
 
-    const chains = buildChains(data);
+    const COLUMN_LABELS = ['Imports', 'Variables', 'Clases / Funciones', 'Parámetros / Métodos'];
 
-    for (const chain of chains) {
-        const chainColor = chainColors[chain[0]] || '#666';
-        if (chain.length > 1) {
-            const first = pos[chain[0]], last = pos[chain[chain.length - 1]];
-            if (first && last) {
-                const padX = 20, padY = 15;
-                linkGroup.append('rect')
-                    .attr('x', first.x - padX)
-                    .attr('y', first.y - padY - 18)
-                    .attr('width', first.w + padX * 2)
-                    .attr('height', (last.y + last.h + padY) - (first.y - padY) + 18)
-                    .attr('rx', 12).attr('ry', 12)
-                    .attr('fill', chainColor + '08')
-                    .attr('stroke', chainColor + '20')
-                    .attr('stroke-width', 1)
-                    .attr('stroke-dasharray', '5,3')
-                    .lower();
+    for (let c = 0; c < 4; c++) {
+        const colNodes = data.nodes.filter(n => pos[n.id] && pos[n.id].col === c);
+        if (!colNodes.length) continue;
 
-                linkGroup.append('rect')
-                    .attr('x', first.x - padX)
-                    .attr('y', first.y - padY - 18)
-                    .attr('width', 90)
-                    .attr('height', 16)
-                    .attr('rx', 4).attr('ry', 4)
-                    .attr('fill', chainColor + '25')
-                    .lower();
+        const first = pos[colNodes[0].id];
+        const last = pos[colNodes[colNodes.length - 1].id];
+        const padX = 16, padY = 14;
 
-                linkGroup.append('text')
-                    .attr('x', first.x - padX + 6)
-                    .attr('y', first.y - padY - 8)
-                    .attr('fill', chainColor)
-                    .attr('font-size', '9px')
-                    .attr('font-weight', '700')
-                    .text(`Cadena ${chains.indexOf(chain) + 1}`);
-            }
-        }
+        linkGroup.append('rect')
+            .attr('x', first.x - padX)
+            .attr('y', first.y - padY - 22)
+            .attr('width', first.w + padX * 2)
+            .attr('height', (last.y + last.h + padY) - (first.y - padY) + 22)
+            .attr('rx', 14).attr('ry', 14)
+            .attr('fill', 'rgba(0, 217, 255, 0.02)')
+            .attr('stroke', 'rgba(0, 217, 255, 0.08)')
+            .attr('stroke-width', 1)
+            .attr('stroke-dasharray', '6,4')
+            .lower();
+
+        linkGroup.append('text')
+            .attr('x', first.x - padX + 8)
+            .attr('y', first.y - padY - 10)
+            .attr('fill', 'rgba(0, 217, 255, 0.4)')
+            .attr('font-size', '9px')
+            .attr('font-weight', '700')
+            .attr('letter-spacing', '1px')
+            .text(COLUMN_LABELS[c])
+            .lower();
     }
 
-    for (const chain of chains) {
-        const chainColor = chainColors[chain[0]] || '#666';
-        for (let i = 0; i < chain.length - 1; i++) {
-            const s = pos[chain[i]], t = pos[chain[i + 1]];
-            if (!s || !t) continue;
+    for (const link of data.links) {
+        const s = pos[link.source], t = pos[link.target];
+        if (!s || !t) continue;
 
-            const sx = s.x + s.w / 2, sy = s.y + s.h;
-            const tx = t.x + t.w / 2, ty = t.y;
-            const midY = (sy + ty) / 2;
+        const sourceNode = data.nodes.find(n => n.id === link.source);
+        const targetNode = data.nodes.find(n => n.id === link.target);
+        const linkInfo = getLinkInfo(sourceNode, targetNode, link.linkType || 'uses');
 
-            const sourceNode = data.nodes.find(n => n.id === chain[i]);
-            const targetNode = data.nodes.find(n => n.id === chain[i + 1]);
-            const linkData = data.links.find(l => l.source === chain[i] && l.target === chain[i + 1]);
-            const linkInfo = getLinkInfo(sourceNode, targetNode, linkData ? linkData.linkType : 'uses');
+        const sx = s.x + s.w;
+        const sy = s.y + s.h / 2;
+        const tx = t.x;
+        const ty = t.y + t.h / 2;
 
-            const dashArray = linkInfo.style === 'dashed' ? '8,4' : linkInfo.style === 'dotted' ? '3,3' : 'none';
-            const strokeW = linkInfo.style === 'solid' ? 4 : 3;
-            const linkColor = linkInfo.color || chainColor;
+        const dx = tx - sx;
+        const cp1x = sx + dx * 0.4;
+        const cp2x = tx - dx * 0.4;
 
-            const linkPath = linkGroup.append('path')
-                .attr('d', `M${sx},${sy} C${sx},${midY} ${tx},${midY} ${tx},${ty}`)
-                .attr('fill', 'none')
-                .attr('stroke', linkColor)
-                .attr('stroke-width', strokeW)
-                .attr('stroke-opacity', 0.6)
-                .attr('stroke-dasharray', dashArray)
-                .attr('marker-end', `url(${getChainMarkerId(linkColor)})`)
-                .style('cursor', 'pointer')
-                .attr('data-source', chain[i])
-                .attr('data-target', chain[i + 1])
-                .on('mouseover', function () {
-                    d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
-                    showLinkTooltip(d3.event, linkInfo, sourceNode, targetNode);
-                })
-                .on('mouseout', function () {
-                    d3.select(this).attr('stroke-opacity', 0.6).attr('stroke-width', strokeW);
-                    hideLinkTooltip();
+        const dashArray = linkInfo.style === 'dashed' ? '10,5' : linkInfo.style === 'dotted' ? '4,4' : 'none';
+        const strokeW = linkInfo.style === 'solid' ? 3.5 : 2.5;
+        const linkColor = linkInfo.color || '#666';
+
+        const linkPath = linkGroup.append('path')
+            .attr('d', `M${sx},${sy} C${cp1x},${sy} ${cp2x},${ty} ${tx},${ty}`)
+            .attr('fill', 'none')
+            .attr('stroke', linkColor)
+            .attr('stroke-width', strokeW)
+            .attr('stroke-opacity', 0.55)
+            .attr('stroke-dasharray', dashArray)
+            .attr('marker-end', `url(${getChainMarkerId(linkColor)})`)
+            .style('cursor', 'pointer')
+            .attr('data-source', link.source)
+            .attr('data-target', link.target)
+            .on('mouseover', function (event) {
+                d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5.5);
+                clearAllHighlights();
+                showLinkTooltip(event, linkInfo, sourceNode, targetNode);
+                if (sourceNode && sourceNode.line !== undefined) highlightCodeLine(sourceNode.line);
+                if (targetNode && targetNode.line !== undefined) highlightCodeLine(targetNode.line);
+                nodeGroup.selectAll('g').attr('opacity', function (n) {
+                    return n.id === link.source || n.id === link.target ? 1 : 0.15;
                 });
+            })
+            .on('mouseout', function () {
+                d3.select(this).attr('stroke-opacity', 0.55).attr('stroke-width', strokeW);
+                hideLinkTooltip();
+                clearAllHighlights();
+                nodeGroup.selectAll('g').attr('opacity', 1);
+            });
 
-            if (linkInfo) {
-                const lblX = (sx + tx) / 2 + 14;
-                const lblY = (sy + ty) / 2;
+        if (linkInfo) {
+            const mx2 = (sx + tx) / 2;
+            const my2 = (sy + ty) / 2;
+            const lblOffset = (t.y > s.y) ? 14 : -14;
 
-                const labelBg = linkGroup.append('rect')
-                    .attr('x', lblX - 6)
-                    .attr('y', lblY - 11)
-                    .attr('width', linkInfo.label.length * 5.5 + 12)
-                    .attr('height', 18)
-                    .attr('rx', 5)
-                    .attr('fill', '#0d0d1a')
-                    .attr('stroke', linkColor + '50')
-                    .attr('stroke-width', 1)
-                    .attr('opacity', 0.9)
-                    .style('pointer-events', 'none');
+            const labelBg = linkGroup.append('rect')
+                .attr('x', mx2 - 4)
+                .attr('y', my2 + lblOffset - 10)
+                .attr('width', linkInfo.label.length * 5.2 + 14)
+                .attr('height', 18)
+                .attr('rx', 9)
+                .attr('fill', 'rgba(13, 13, 26, 0.9)')
+                .attr('stroke', linkColor + '40')
+                .attr('stroke-width', 1)
+                .attr('opacity', 0)
+                .style('pointer-events', 'none');
 
-                linkGroup.append('text')
-                    .attr('x', lblX).attr('y', lblY)
-                    .attr('text-anchor', 'start')
-                    .attr('dominant-baseline', 'middle')
-                    .attr('fill', linkColor).attr('font-size', '9px').attr('font-weight', '600').attr('opacity', 0.95)
-                    .text(linkInfo.label)
-                    .style('pointer-events', 'none');
+            linkPath.on('mouseover.label', function () { labelBg.attr('opacity', 1); });
+            linkPath.on('mouseout.label', function () { labelBg.attr('opacity', 0); });
 
-                linkGroup.append('text')
-                    .attr('x', lblX - 6).attr('y', lblY)
-                    .attr('text-anchor', 'end')
-                    .attr('dominant-baseline', 'middle')
-                    .attr('fill', linkColor).attr('font-size', '12px').attr('font-weight', '700').attr('opacity', 0.8)
-                    .text(linkInfo.icon)
-                    .style('pointer-events', 'none');
-            }
+            const labelText = linkGroup.append('text')
+                .attr('x', mx2 + 3).attr('y', my2 + lblOffset)
+                .attr('text-anchor', 'start')
+                .attr('dominant-baseline', 'middle')
+                .attr('fill', linkColor).attr('font-size', '8.5px').attr('font-weight', '600').attr('opacity', 0)
+                .text(linkInfo.label)
+                .style('pointer-events', 'none');
+
+            linkPath.on('mouseover.labeltext', function () { labelText.attr('opacity', 0.95); });
+            linkPath.on('mouseout.labeltext', function () { labelText.attr('opacity', 0); });
         }
     }
+
+    const iconMap = { variable: 'V', function: 'F', class: 'C', parameter: 'P', property: '\u00b7', method: 'M', constant: 'K', imported: 'I', template: 'T', default: '?' };
 
     const ng = nodeGroup.selectAll('g').data(data.nodes).enter().append('g')
         .attr('transform', d => { const p = pos[d.id]; return p ? `translate(${p.x},${p.y})` : 'translate(0,0)'; })
-        .style('cursor', 'pointer')
+        .style('cursor', 'grab')
         .on('click', (e, d) => showNodeInfo(d))
-        .on('mouseover', function (e, d) { highlightNode(d); highlightNodeCode(d); })
-        .on('mouseout', function () { resetHighlight(); })
+        .on('mouseover', function (e, d) {
+            clearAllHighlights();
+            highlightNode(d);
+            highlightNodeCode(d);
+            linkGroup.selectAll('path').each(function () {
+                const src = d3.select(this).attr('data-source');
+                const tgt = d3.select(this).attr('data-target');
+                if (src === d.id || tgt === d.id) {
+                    d3.select(this).attr('stroke-opacity', 1).attr('stroke-width', 5);
+                    const otherId = src === d.id ? tgt : src;
+                    const otherNode = data.nodes.find(n => n.id === otherId);
+                    if (otherNode && otherNode.line !== undefined) highlightCodeLine(otherNode.line);
+                }
+            });
+        })
+        .on('mouseout', function () {
+            resetHighlight();
+            clearAllHighlights();
+        })
         .call(d3.drag()
-            .on('start', function () { d3.select(this).raise(); })
-            .on('drag', function (e, d) { const p = pos[d.id]; if (p) { p.x += e.dx; p.y += e.dy; d3.select(this).attr('transform', `translate(${p.x},${p.y})`); } }));
+            .on('start', function (event, d) {
+                d3.select(this).raise().style('cursor', 'grabbing');
+            })
+            .on('drag', function (event, d) {
+                const p = pos[d.id];
+                if (p) {
+                    p.x += event.dx;
+                    p.y += event.dy;
+                    d3.select(this).attr('transform', `translate(${p.x},${p.y})`);
+                    updateLinksForNode(d.id, pos, data);
+                }
+            })
+            .on('end', function (event, d) {
+                d3.select(this).style('cursor', 'grab');
+            }));
 
-    ng.append('rect')
-        .attr('width', d => pos[d.id] ? pos[d.id].w : 180)
-        .attr('height', d => pos[d.id] ? pos[d.id].h : 50)
-        .attr('rx', 8).attr('ry', 8)
-        .attr('fill', '#1a1f35')
-        .attr('stroke', d => d.color + '50')
-        .attr('stroke-width', 1)
-        .style('filter', 'drop-shadow(0 2px 6px rgba(0,0,0,0.3))');
+    ng.each(function (d) {
+        const g = d3.select(this);
+        const p = pos[d.id];
+        const w = p ? p.w : 220;
+        const h = p ? p.h : 64;
+        const c = d.color;
 
-    ng.append('rect')
-        .attr('width', d => pos[d.id] ? pos[d.id].w : 180)
-        .attr('height', 4)
-        .attr('rx', 2).attr('ry', 2)
-        .attr('y', 0)
-        .attr('fill', d => d.color);
+        g.append('rect')
+            .attr('width', w).attr('height', h)
+            .attr('rx', 10).attr('ry', 10)
+            .attr('fill', '#111827')
+            .attr('stroke', c + '60')
+            .attr('stroke-width', 1.5)
+            .style('filter', 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))');
 
-    ng.append('rect')
-        .attr('width', 3)
-        .attr('height', d => pos[d.id] ? pos[d.id].h - 4 : 46)
-        .attr('x', 10)
-        .attr('y', 6)
-        .attr('rx', 1.5).attr('ry', 1.5)
-        .attr('fill', d => d.color + '35');
+        g.append('rect')
+            .attr('width', 5).attr('height', h - 8)
+            .attr('x', 0).attr('y', 4)
+            .attr('rx', 2.5).attr('ry', 2.5)
+            .attr('fill', c);
 
-    ng.append('text')
-        .attr('x', 20).attr('y', 22)
-        .attr('dominant-baseline', 'middle')
-        .attr('fill', '#ffffff').attr('font-size', '11px')
-        .attr('font-family', "'Consolas','Fira Code',monospace").attr('font-weight', '600')
-        .text(d => d.id.length > 18 ? d.id.substring(0, 15) + '...' : d.id);
+        g.append('rect')
+            .attr('x', 14).attr('y', 10)
+            .attr('width', 22).attr('height', 22)
+            .attr('rx', 6).attr('ry', 6)
+            .attr('fill', c + '25')
+            .attr('stroke', c + '40')
+            .attr('stroke-width', 1);
 
-    ng.append('text')
-        .attr('x', 20).attr('y', 38)
-        .attr('dominant-baseline', 'middle')
-        .attr('fill', d => d.color).attr('font-size', '9px').attr('font-weight', '600')
-        .attr('opacity', 0.7)
-        .text(d => TYPE_LABELS[d.type] || d.type);
+        g.append('text')
+            .attr('x', 25).attr('y', 21)
+            .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+            .attr('fill', c).attr('font-size', '11px').attr('font-weight', '800')
+            .attr('font-family', "'Consolas',monospace")
+            .text(iconMap[d.type] || '?');
 
-    ng.append('text')
-        .attr('x', d => pos[d.id] ? pos[d.id].w - 10 : 170)
-        .attr('y', 22).attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-        .attr('fill', '#555').attr('font-size', '9px')
-        .text(d => d.line !== undefined ? `L${d.line + 1}` : '');
+        g.append('text')
+            .attr('x', 42).attr('y', 21)
+            .attr('dominant-baseline', 'middle')
+            .attr('fill', '#ffffff').attr('font-size', '11.5px')
+            .attr('font-family', "'Consolas','Fira Code',monospace").attr('font-weight', '700')
+            .text(d.id.length > 16 ? d.id.substring(0, 13) + '...' : d.id);
 
-    ng.append('circle')
-        .attr('cx', d => pos[d.id] ? pos[d.id].w - 10 : 170)
-        .attr('cy', 38)
-        .attr('r', 4)
-        .attr('fill', d => d.color)
-        .attr('opacity', 0.5);
+        g.append('text')
+            .attr('x', 14).attr('y', 44)
+            .attr('dominant-baseline', 'middle')
+            .attr('fill', c).attr('font-size', '9px').attr('font-weight', '600')
+            .attr('opacity', 0.65)
+            .text(TYPE_LABELS[d.type] || d.type);
+
+        g.append('text')
+            .attr('x', w - 16).attr('y', 44)
+            .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+            .attr('fill', '#555').attr('font-size', '8.5px')
+            .text(d.line !== undefined ? 'L' + (d.line + 1) : '');
+
+        g.append('circle')
+            .attr('cx', 6).attr('cy', h / 2)
+            .attr('r', 4).attr('fill', c).attr('opacity', 0.35);
+
+        g.append('circle')
+            .attr('cx', w - 6).attr('cy', h / 2)
+            .attr('r', 4).attr('fill', c).attr('opacity', 0.35);
+
+        g.append('circle')
+            .attr('cx', w - 16).attr('cy', 14)
+            .attr('r', 5).attr('fill', c).attr('opacity', 0.5);
+    });
 
     updateLegend();
-
     setTimeout(autoFitZoom, 50);
 }
 
@@ -1212,24 +1306,18 @@ function autoFitZoom() {
     const container = document.getElementById('graph-container');
     const W = container.clientWidth;
     const H = container.clientHeight;
-    const NODE_W = 180, NODE_H = 50, V_GAP = 55, CHAIN_GAP = 70, MARGIN = 30;
 
-    const chains = buildChains(currentData);
-    let totalY = MARGIN;
+    Object.values(computeLayout(currentData)).forEach(p => {
+        pos[Object.keys(pos).length] = p;
+    });
+
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-
-    for (const chain of chains) {
-        const centerX = W / 2;
-        for (let i = 0; i < chain.length; i++) {
-            const x = centerX - NODE_W / 2;
-            const y = totalY + i * (NODE_H + V_GAP);
-            if (x < minX) minX = x;
-            if (x + NODE_W > maxX) maxX = x + NODE_W;
-            if (y < minY) minY = y;
-            if (y + NODE_H > maxY) maxY = y + NODE_H;
-        }
-        totalY += chain.length * (NODE_H + V_GAP) + CHAIN_GAP;
-    }
+    Object.values(pos).forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x + p.w > maxX) maxX = p.x + p.w;
+        if (p.y < minY) minY = p.y;
+        if (p.y + p.h > maxY) maxY = p.y + p.h;
+    });
 
     if (minX === Infinity) return;
 
@@ -1305,13 +1393,29 @@ function resetHighlight() {
     linkGroup.selectAll('text').attr('opacity', 1);
 }
 
+function ensureEditorVisible() {
+    const overlay = document.getElementById('editorOverlay');
+    if (overlay.classList.contains('hidden')) {
+        overlay.classList.remove('hidden');
+    }
+}
+
+let _highlightedLines = [];
+
 function highlightCodeLine(lineNum) {
-    if (!editor || lineNum === undefined) return;
+    if (!editor || lineNum === undefined || lineNum === null) return;
+    ensureEditorVisible();
+    _highlightedLines.push(lineNum);
     editor.addLineClass(lineNum, 'background', 'highlight-line');
-    editor.scrollIntoView({ line: lineNum, ch: 0 }, 100);
-    setTimeout(() => {
-        editor.removeLineClass(lineNum, 'background', 'highlight-line');
-    }, 2000);
+    editor.scrollIntoView({ line: lineNum, ch: 0 }, 80);
+}
+
+function clearAllHighlights() {
+    if (!editor) return;
+    for (const line of _highlightedLines) {
+        editor.removeLineClass(line, 'background', 'highlight-line');
+    }
+    _highlightedLines = [];
 }
 
 function highlightNodeCode(d) {
@@ -1538,6 +1642,8 @@ function init() {
         'text/x-htmlembedded': `{% extends "base.html" %}\n\n{% block title %}{{ page_title }}{% endblock %}\n\n{% block content %}\n<div class="container">\n    <h1>{{ page_title }}</h1>\n    {% for item in items %}\n        <div class="item">\n            {{ item.name }}\n            {% if item.featured %}\n                <span class="featured">Destacado</span>\n            {% endif %}\n        </div>\n    {% empty %}\n        <p>No hay elementos</p>\n    {% endfor %}\n\n    {% include "partials/sidebar.html" with {"categories": categories} %}\n</div>\n\n<script>\n    const items = {{ items_json|safe }};\n    console.log(items);\n</script>\n{% endblock %}`,
         vue: `<template>\n  <div class="app">\n    <h1>{{ message }}</h1>\n    <UserList :users="users" @select="handleSelect" />\n  </div>\n</template>\n\n<script>\nimport { ref, onMounted } from 'vue';\nimport UserList from './components/UserList.vue';\nimport { fetchUsers } from './api';\n\nexport default {\n  components: { UserList },\n  setup() {\n    const message = ref('Hello');\n    const users = ref([]);\n\n    onMounted(async () => {\n      users.value = await fetchUsers();\n    });\n\n    const handleSelect = (user) => {\n      console.log(user);\n    };\n\n    return { message, users, handleSelect };\n  }\n};\n</script>`,
         jsx: `import React, { useState, useEffect } from 'react';\nimport { fetchData } from './api';\nimport UserCard from './UserCard';\n\nconst App = () => {\n  const [users, setUsers] = useState([]);\n  const [loading, setLoading] = useState(true);\n\n  useEffect(() => {\n    const loadUsers = async () => {\n      const data = await fetchData('/api/users');\n      setUsers(data);\n      setLoading(false);\n    };\n    loadUsers();\n  }, []);\n\n  const handleDelete = (id) => {\n    setUsers(users.filter(u => u.id !== id));\n  };\n\n  if (loading) return <div className="spinner">Loading...</div>;\n\n  return (\n    <div className="app">\n      <h1>Users</h1>\n      <div className="grid">\n        {users.map(user => (\n          <UserCard key={user.id} user={user} onDelete={handleDelete} />\n        ))}\n      </div>\n    </div>\n  );\n};\n\nexport default App;`,
+        'text/htmlmixed': `<!DOCTYPE html>\n<html lang="es">\n<head>\n    <meta charset="UTF-8">\n    <title>Mi App</title>\n    <link rel="stylesheet" href="styles.css">\n</head>\n<body>\n    <header class="main-header">\n        <h1 id="title">Hola Mundo</h1>\n        <nav id="menu">\n            <a href="/" class="nav-link">Inicio</a>\n            <a href="/about" class="nav-link">About</a>\n        </nav>\n    </header>\n    <main id="content">\n        <div class="card" data-id="1">\n            <h2>Card Title</h2>\n            <p>Card content here</p>\n            <button onclick="handleClick()">Click me</button>\n        </div>\n    </main>\n    <script src="app.js"><\/script>\n</body>\n</html>`,
+        'text/css': `/* Variables CSS */\n:root {\n    --primary: #00d9ff;\n    --secondary: #00ff88;\n    --bg-dark: #0d0d1a;\n    --text-light: #eaeaea;\n}\n\n/* Reset */\n* {\n    margin: 0;\n    padding: 0;\n    box-sizing: border-box;\n}\n\nbody {\n    font-family: 'Segoe UI', sans-serif;\n    background: var(--bg-dark);\n    color: var(--text-light);\n}\n\n.container {\n    max-width: 1200px;\n    margin: 0 auto;\n    padding: 20px;\n}\n\n.header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 15px 0;\n    border-bottom: 1px solid var(--primary);\n}\n\n.btn {\n    padding: 10px 20px;\n    background: linear-gradient(135deg, var(--primary), var(--secondary));\n    border: none;\n    border-radius: 8px;\n    cursor: pointer;\n    transition: transform 0.2s;\n}\n\n.btn:hover {\n    transform: translateY(-2px);\n}\n\n.card {\n    background: rgba(22, 33, 62, 0.8);\n    border-radius: 12px;\n    padding: 20px;\n    margin: 10px 0;\n}\n\n@media (max-width: 768px) {\n    .container { padding: 10px; }\n    .header { flex-direction: column; }\n}`,
     };
 
     const langSelect = document.getElementById('language');

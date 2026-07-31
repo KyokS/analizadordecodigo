@@ -12,7 +12,11 @@ body {
 #graph-container {
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at 30% 40%, #141428 0%, #0d0d1a 60%);
+    background:
+        radial-gradient(ellipse at 30% 40%, #141428 0%, #0d0d1a 60%),
+        linear-gradient(rgba(0, 217, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 217, 255, 0.02) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px, 40px 40px;
     cursor: grab;
     z-index: 0;
 }
@@ -139,14 +143,28 @@ body {
 }
 
 .highlight-line {
-    background: rgba(0, 217, 255, 0.15) !important;
-    border-left: 3px solid #00d9ff !important;
-    animation: lineFlash 2s ease-out;
+    background: rgba(0, 217, 255, 0.2) !important;
+    border-left: 4px solid #00d9ff !important;
+    position: relative;
+    animation: linePulse 1.5s ease-out;
 }
 
-@keyframes lineFlash {
-    0% { background: rgba(0, 217, 255, 0.4); }
-    100% { background: rgba(0, 217, 255, 0.15); }
+.highlight-line::after {
+    content: '← conexion';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 9px;
+    color: #00d9ff;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+@keyframes linePulse {
+    0% { background: rgba(0, 217, 255, 0.45); border-left-width: 6px; }
+    50% { background: rgba(0, 217, 255, 0.25); }
+    100% { background: rgba(0, 217, 255, 0.15); border-left-width: 4px; }
 }
 
 .btn-close {
@@ -365,10 +383,24 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(0, 217, 255, 0.2); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 217, 255, 0.4); }
 
-/* Node animations */
+/* Node block animations */
 g > rect { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-g:hover > rect:first-child { filter: brightness(1.5) drop-shadow(0 0 16px currentColor); }
-g > rect:first-child { filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5)); }
+
+g:hover > rect:first-child {
+    filter: brightness(1.4) drop-shadow(0 0 20px currentColor);
+    stroke-width: 2.5;
+}
+
+g > rect:first-child { filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5)); }
+
+g[data-dragging="true"] > rect:first-child {
+    filter: brightness(1.6) drop-shadow(0 0 24px currentColor);
+    stroke-width: 2.5;
+}
+
+/* Port glow on hover */
+circle { transition: all 0.2s ease; }
+g:hover circle { opacity: 0.8 !important; r: 5; }
 
 @keyframes flowPulse {
     0% { stroke-opacity: 0.35; }
@@ -378,18 +410,18 @@ g > rect:first-child { filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5)); }
 
 /* Link path hover effect */
 path[data-source]:hover {
-    filter: drop-shadow(0 0 6px currentColor);
+    filter: drop-shadow(0 0 8px currentColor);
 }
 
 /* Link animation */
-@keyframes linkPulse {
+@keyframes linkFlow {
     0% { stroke-dashoffset: 0; }
-    100% { stroke-dashoffset: 20; }
+    100% { stroke-dashoffset: -20; }
 }
 
-path[stroke-dasharray="8,4"],
-path[stroke-dasharray="3,3"] {
-    animation: linkPulse 1.5s linear infinite;
+path[data-source][stroke-dasharray="10,5"],
+path[data-source][stroke-dasharray="4,4"] {
+    animation: linkFlow 1.5s linear infinite;
 }
 
 /* Link tooltip */
